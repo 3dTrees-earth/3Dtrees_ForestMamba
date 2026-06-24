@@ -79,23 +79,14 @@ The 3Dtrees Galaxy wrapper uses the image
 workflow builds that image from `Dockerfile.3dtrees` when a GitHub release is
 published.
 
-`Dockerfile.3dtrees` is an overlay image: it copies this repository, the Galaxy
-entrypoint, and the patched OpenMMLab files into a runtime base image. The base
-image must already contain the ForestMamba Python/CUDA dependencies and the
-pre-trained checkpoint at:
+The workflow first builds the upstream ForestMamba `Dockerfile` as a local base
+image, then builds the 3Dtrees overlay image. `Dockerfile.3dtrees` adds the
+Galaxy entrypoint, the patched OpenMMLab files, the Mamba/LAZ runtime packages,
+and the pre-trained checkpoint at:
 
 ```
 /workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/epoch_3000_fix.pth
 ```
-
-By default the workflow expects:
-
-```
-ghcr.io/3dtrees-earth/3dtrees_forestmamba_runtime:latest
-```
-
-For manual workflow dispatches, override the `base_image` input if a different
-validated runtime image should be used.
 
 ### 4. Replace required mmengine/mmdet3d files
 
