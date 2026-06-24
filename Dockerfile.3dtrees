@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir \
     wandb==0.16.6 \
     "laspy[lazrs]==2.5.4"
 
+RUN pip uninstall -y torch-cluster torch-points-kernels \
+    && FORCE_CUDA=1 pip install --no-deps --no-cache-dir torch-cluster==1.6.3 \
+    && FORCE_CUDA=1 pip install --no-deps --no-cache-dir torch-points-kernels==0.7.0
+
 RUN python -c "from pathlib import Path; from urllib.request import urlopen; Path('/tmp/forestmamba-checkpoint.zip').write_bytes(urlopen('${CHECKPOINT_URL}').read())" \
     && python -c "from pathlib import Path; from zipfile import ZipFile; checkpoint_path = Path('${CHECKPOINT_PATH}'); checkpoint_path.parent.mkdir(parents=True, exist_ok=True); checkpoint_path.write_bytes(ZipFile('/tmp/forestmamba-checkpoint.zip').read('${CHECKPOINT_MEMBER}'))" \
     && rm /tmp/forestmamba-checkpoint.zip
