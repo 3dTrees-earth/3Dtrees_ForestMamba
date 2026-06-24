@@ -14,7 +14,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -92,3 +92,36 @@ jobs:
             [ -n "${tag}" ] || continue
             docker push "${tag}"
           done
+
+      - name: Add image details to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DOCKER_METADATA_OUTPUT_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Container images"
+            echo
+            echo "Published image tags:"
+            while IFS= read -r tag; do
+              [ -n "${tag}" ] || continue
+              echo "- \`${tag}\`"
+            done <<< "${DOCKER_METADATA_OUTPUT_TAGS}"
+            echo
+            echo "Base image:"
+            echo "- \`${BASE_IMAGE}\`"
+          } > release-image-notes.md
+
+          gh release view "${RELEASE_TAG}" --json body --jq .body > release-body.md
+          if grep -F "### Container images" release-body.md >/dev/null; then
+            echo "Release already contains container image details."
+            exit 0
+          fi
+
+          {
+            cat release-body.md
+            echo
+            cat release-image-notes.md
+          } > updated-release-body.md
+          gh release edit "${RELEASE_TAG}" --notes-file updated-release-body.md
