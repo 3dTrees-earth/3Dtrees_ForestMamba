@@ -88,6 +88,15 @@ and the pre-trained checkpoint at:
 /workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/epoch_3000_fix.pth
 ```
 
+The production image currently downloads the checkpoint from the Zenodo
+`clean_forestformer.zip` bundle and extracts
+`clean_forestformer/epoch_3000_fix.pth`. The expected SHA256 for the extracted
+checkpoint is:
+
+```
+01037a648596832238ac72ea2f5eef87ceaf5aeb399e56ff4b760ba1ed1c777e
+```
+
 ### 4. Replace required mmengine/mmdet3d files
 
 ```bash
@@ -287,7 +296,13 @@ python /workspace/src/run.py \
   --bluepoint-second-pass-threshold 0.01
 ```
 
-The wrapper sets the model's bluepoint output mode for the run. It always runs the first pass, runs the second pass only when more than the configured fraction of first-pass points are non-ground with raw `instance_pred == -1`, then applies the direct predictions to the original LAZ rows and writes an enriched LAZ with the ForestMamba dimensions.
+The wrapper sets the model's bluepoint output mode for the run. It always runs
+the first pass, then runs the second pass only when more than the configured
+fraction of all first-pass points are non-ground with raw
+`instance_pred == -1`. With the default `0.01`, the second pass runs when more
+than 1% of all first-pass points satisfy that condition. The wrapper then
+applies the direct predictions to the original LAZ rows and writes an enriched
+LAZ with the ForestMamba dimensions.
 
 The legacy shell path still exists for manual experiments:
 
