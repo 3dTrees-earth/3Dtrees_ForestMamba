@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=forestmamba-3dtrees-runtime-readable:latest
+ARG BASE_IMAGE=ghcr.io/3dtrees-earth/3dtrees_forestmamba_runtime:latest
 FROM ${BASE_IMAGE}
 
 COPY . /workspace
