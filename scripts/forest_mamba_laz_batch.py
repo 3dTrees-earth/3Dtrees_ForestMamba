@@ -24,12 +24,12 @@ from scipy.spatial import cKDTree
 
 
 DEFAULT_CHECKPOINT = (
-    "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/"
+    "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/"
     "epoch_3000_fix.pth"
 )
 DEFAULT_CONFIG_BASE = (
     "/workspace/configs/ForAINetv2/"
-    "forestmamba_chm_radius16_qp300_2many_v6.py"
+    "forestmamba_chm_radius16_qp300_2many_v6_expand_1.py"
 )
 PLACEHOLDER_PLY_DTYPE = np.dtype(
     [

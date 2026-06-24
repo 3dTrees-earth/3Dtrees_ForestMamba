@@ -1,0 +1,18 @@
+ARG BASE_IMAGE=forestmamba-3dtrees-runtime-readable:latest
+FROM ${BASE_IMAGE}
+
+COPY . /workspace
+RUN chmod -R a+rX /workspace
+
+COPY replace_mmdetection_files/loops.py /opt/conda/lib/python3.10/site-packages/mmengine/runner/loops.py
+COPY replace_mmdetection_files/base_model.py /opt/conda/lib/python3.10/site-packages/mmengine/model/base_model/base_model.py
+COPY replace_mmdetection_files/transforms_3d.py /opt/conda/lib/python3.10/site-packages/mmdet3d/datasets/transforms/transforms_3d.py
+COPY replace_mmdetection_files/distributed.py /opt/conda/lib/python3.10/site-packages/mmengine/model/wrappers/distributed.py
+RUN chmod a+r \
+    /opt/conda/lib/python3.10/site-packages/mmengine/runner/loops.py \
+    /opt/conda/lib/python3.10/site-packages/mmengine/model/base_model/base_model.py \
+    /opt/conda/lib/python3.10/site-packages/mmdet3d/datasets/transforms/transforms_3d.py \
+    /opt/conda/lib/python3.10/site-packages/mmengine/model/wrappers/distributed.py
+
+ENV PYTHONPATH=/workspace
+ENV WANDB_MODE=disabled

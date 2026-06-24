@@ -1,0 +1,13 @@
+.git
+__pycache__/
+*.pyc
+
+data/*
+!data/ForAINetV2/
+!data/ForAINetV2/**
+
+downloads/
+work_dirs/
+
+**/.pytest_cache/
+**/.mypy_cache/
