@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=forestmamba-image:3dtrees-base
+ARG BASE_IMAGE=ghcr.io/kgerb/forestmamba-image:3dtrees-base
 FROM ${BASE_IMAGE}
 
 ARG CHECKPOINT_URL=https://zenodo.org/api/records/16742708/files/clean_forestformer.zip/content

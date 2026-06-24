@@ -8,7 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: 3dtrees-earth/3dtrees_forestmamba
-  BASE_IMAGE: forestmamba-image:3dtrees-base
+  BASE_IMAGE: ghcr.io/kgerb/forestmamba-image:3dtrees-base
 
 jobs:
   build-and-push:
@@ -56,9 +56,6 @@ jobs:
             /usr/local/share/powershell \
             /usr/share/dotnet \
             /usr/share/swift
-
-      - name: Build ForestMamba base image
-        run: docker build --file Dockerfile --tag "${BASE_IMAGE}" .
 
       - name: Build and push Docker image
         env:
