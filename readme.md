@@ -90,7 +90,7 @@ ghcr.io/kgerb/forestmamba-image:3dtrees-base
 the Mamba/LAZ runtime packages, and the pre-trained checkpoint at:
 
 ```
-/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/epoch_3000_fix.pth
+/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000_fix.pth
 ```
 
 The production image currently downloads the checkpoint from the Zenodo

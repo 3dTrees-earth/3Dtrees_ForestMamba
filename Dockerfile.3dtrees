@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 ARG CHECKPOINT_URL=https://zenodo.org/api/records/16742708/files/clean_forestformer.zip/content
 ARG CHECKPOINT_MEMBER=clean_forestformer/epoch_3000_fix.pth
-ARG CHECKPOINT_PATH=/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/epoch_3000_fix.pth
+ARG CHECKPOINT_PATH=/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000_fix.pth
 ARG TORCH_CUDA_ARCH_LIST="6.1;7.0;8.0;8.6"
 
 RUN pip install --no-cache-dir \
