@@ -10,12 +10,12 @@ from typing import Iterable
 
 
 DEFAULT_CHECKPOINT = (
-    "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/"
-    "epoch_3000_fix.pth"
+    "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/"
+    "v6_epoch_1500_fix.pth"
 )
 DEFAULT_CONFIG_BASE = (
     "/workspace/configs/ForAINetv2/"
-    "forestmamba_chm_radius16_qp300_2many_v6_expand_1.py"
+    "forestmamba_chm_radius16_qp300_2many_v6.py"
 )
 DEFAULT_REPO_DIR = Path(__file__).resolve().parents[1]
 

@@ -9,6 +9,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: 3dtrees-earth/3dtrees_forestmamba
   BASE_IMAGE: ghcr.io/kgerb/forestmamba-image:3dtrees-base
+  CHECKPOINT_FILE_ID: 1XJ__eeYUDLbdaj77f_ryxydIs3FiTQaT
+  CHECKPOINT_PATH: work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
+  CHECKPOINT_SHA256: a398d6e5e79af8ce9cf697fdd10b1887927dc838cdafcb5ae5c3352a2d56d96a
 
 jobs:
   build-and-push:
@@ -56,6 +59,13 @@ jobs:
             /usr/local/share/powershell \
             /usr/share/dotnet \
             /usr/share/swift
+
+      - name: Download ForestMamba checkpoint
+        run: |
+          python -m pip install --user --no-cache-dir gdown
+          mkdir -p "$(dirname "${CHECKPOINT_PATH}")"
+          python -m gdown --id "${CHECKPOINT_FILE_ID}" -O "${CHECKPOINT_PATH}"
+          echo "${CHECKPOINT_SHA256}  ${CHECKPOINT_PATH}" | sha256sum -c -
 
       - name: Build and push Docker image
         env:

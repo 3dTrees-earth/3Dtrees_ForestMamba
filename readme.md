@@ -22,7 +22,7 @@ ForestMamba/
 │       └── test_data/
 ├── work_dirs/
 │   └── forestmamba_chm_radius16_qp300_2many_v6/
-│       └── epoch_3000_fix.pth                                 ← pre-trained checkpoint
+│       └── v6_epoch_1500_fix.pth                              ← pre-trained checkpoint
 ```
 
 ---
@@ -90,16 +90,14 @@ ghcr.io/kgerb/forestmamba-image:3dtrees-base
 the Mamba/LAZ runtime packages, and the pre-trained checkpoint at:
 
 ```
-/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6_expand_1/epoch_3000_fix.pth
+/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
 ```
 
-The production image currently downloads the checkpoint from the Zenodo
-`clean_forestformer.zip` bundle and extracts
-`clean_forestformer/epoch_3000_fix.pth`. The expected SHA256 for the extracted
-checkpoint is:
+The release workflow downloads the v6 checkpoint from Google Drive before the
+Docker build and verifies it with SHA256. The expected SHA256 is:
 
 ```
-01037a648596832238ac72ea2f5eef87ceaf5aeb399e56ff4b760ba1ed1c777e
+a398d6e5e79af8ce9cf697fdd10b1887927dc838cdafcb5ae5c3352a2d56d96a
 ```
 
 After a release image is pushed, the workflow appends the published image tags
