@@ -21,8 +21,8 @@ ForestMamba/
 │       ├── train_val_data/
 │       └── test_data/
 ├── work_dirs/
-│   └── forestmamba/
-│       └── epoch_1500_fix.pth                                 ← pre-trained checkpoint
+│   └── forestmamba_chm_radius16_qp300_2many_v6/
+│       └── v6_epoch_1500_fix.pth                              ← pre-trained checkpoint
 ```
 
 ---
@@ -71,6 +71,37 @@ pip install --no-deps --no-cache-dir torch-points-kernels==0.7.0
 pip uninstall torch-cluster -y
 pip install torch-cluster --no-cache-dir --no-deps
 ```
+
+### Production Galaxy image
+
+The 3Dtrees Galaxy wrapper uses the image
+`ghcr.io/3dtrees-earth/3dtrees_forestmamba:<version>`. The GitHub Actions
+workflow builds that image from `Dockerfile.3dtrees` when a GitHub release is
+published.
+
+The workflow builds the 3Dtrees overlay image on top of the prebuilt
+ForestMamba base image:
+
+```
+ghcr.io/kgerb/forestmamba-image:3dtrees-base
+```
+
+`Dockerfile.3dtrees` adds the Galaxy entrypoint, the patched OpenMMLab files,
+the Mamba/LAZ runtime packages, and the pre-trained checkpoint at:
+
+```
+/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
+```
+
+The release workflow downloads the v6 checkpoint from Google Drive before the
+Docker build and verifies it with SHA256. The expected SHA256 is:
+
+```
+a398d6e5e79af8ce9cf697fdd10b1887927dc838cdafcb5ae5c3352a2d56d96a
+```
+
+After a release image is pushed, the workflow appends the published image tags
+and base image reference to the GitHub Release notes.
 
 ### 4. Replace required mmengine/mmdet3d files
 
@@ -152,7 +183,7 @@ CUDA_VISIBLE_DEVICES=0,1 PORT=29500 bash tools/dist_train.sh \
   configs/ForAINetv2/forestmamba_chm_radius16_qp300_2many_v6.py \
   2 \
   --work-dir work_dirs/forestmamba \
-  --resume work_dirs/forestmamba/epoch_1000.pth
+  --resume work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_1000.pth
 ```
 
 ---
@@ -164,8 +195,8 @@ CUDA_VISIBLE_DEVICES=0,1 PORT=29500 bash tools/dist_train.sh \
 > If you trained your own model, fix the checkpoint first:
 > ```bash
 > python tools/fix_spconv_checkpoint.py \
->   --in-path  work_dirs/forestmamba/epoch_3000.pth \
->   --out-path work_dirs/forestmamba/epoch_3000_fix.pth
+>   --in-path  work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000.pth \
+>   --out-path work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000_fix.pth
 > ```
 
 ### Run inference
@@ -183,7 +214,7 @@ export PYTHONPATH=/workspace/ForestMamba
 
 CUDA_VISIBLE_DEVICES=0 python tools/test.py \
   configs/ForAINetv2/forestmamba_chm_radius16_qp300_2many_v6.py \
-  work_dirs/forestmamba/epoch_3000_fix.pth
+  work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000_fix.pth
 ```
 
 **Multi-GPU:**
@@ -196,7 +227,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
   --master_port=29500 \
   tools/test.py \
   configs/ForAINetv2/forestmamba_chm_radius16_qp300_2many_v6.py \
-  work_dirs/forestmamba/epoch_3000_fix.pth \
+  work_dirs/forestmamba_chm_radius16_qp300_2many_v6/epoch_3000_fix.pth \
   --launcher pytorch
 ```
 
@@ -214,17 +245,37 @@ python tools/eval_predictions.py \
 
 ## Testing on custom data
 
-### 1. Place your test files
+For Galaxy and batch LAZ/LAS inference, use the wrapper entrypoint:
+
+```bash
+python /workspace/src/run.py \
+  --dataset-path /data/input.laz \
+  --output-dir /data/forestmamba_out \
+  --work-dir /data/forestmamba_work
+```
+
+The wrapper stages the input into the ForAINetV2 test layout, writes
+`meta_data/test_list.txt`, runs ForestMamba preprocessing, runs inference, and
+writes an enriched LAZ output. The direct `scripts/forest_mamba_laz_batch.py`
+CLI remains available for local debugging, but Galaxy should call
+`src/run.py`.
+
+### Manual PLY flow
+
+The original manual flow still applies when you are working with the upstream
+PLY test-data layout directly.
+
+#### 1. Place your test files
 
 ```
 /workspace/data/ForAINetV2/test_data/
 ```
 
-### 2. Update the test list
+#### 2. Update the test list
 
 Edit `/workspace/data/ForAINetV2/meta_data/test_list.txt` and append your file names (without extension).
 
-### 3. Re-run preprocessing and inference
+#### 3. Re-run preprocessing and inference
 
 ```bash
 cd /workspace/data/ForAINetV2
@@ -242,21 +293,27 @@ python tools/create_data_forainetv2.py forainetv2
 In very dense plots some trees may be missed in a single pass. A second pass on the remaining unsegmented points improves recall:
 
 ```bash
+python /workspace/src/run.py \
+  --dataset-path /data/input.laz \
+  --output-dir /data/forestmamba_out \
+  --work-dir /data/forestmamba_work \
+  --bluepoint-iterations 2 \
+  --bluepoint-score-threshold 0.4 \
+  --bluepoint-second-pass-threshold 0.01
+```
+
+The wrapper sets the model's bluepoint output mode for the run. It always runs
+the first pass, then runs the second pass only when more than the configured
+fraction of all first-pass points are non-ground with raw
+`instance_pred == -1`. With the default `0.01`, the second pass runs when more
+than 1% of all first-pass points satisfy that condition. The wrapper then
+applies the direct predictions to the original LAZ rows and writes an enriched
+LAZ with the ForestMamba dimensions.
+
+The legacy shell path still exists for manual experiments:
+
+```bash
 bash /workspace/tools/inference_bluepoint.sh
-```
-
-Before running, update `BLUEPOINTS_DIR` in the script to match your output directory, and switch the save mode in `oneformer3d/oneformer3d.py` inside the `predict` function of `ForAINetV2OneFormer3D_XAwarequery`:
-
-```python
-# self.save_ply_withscore(...)
-self.save_bluepoints(...)
-```
-
-And set:
-
-```python
-is_test = True
-if is_test:
 ```
 
 ---
@@ -290,7 +347,7 @@ treeID = np.zeros((points.shape[0],), dtype=np.int64)
 **Tensorboard:**
 
 ```bash
-tensorboard --logdir=work_dirs/forestmamba/vis_data/ --host=0.0.0.0 --port=6006
+tensorboard --logdir=work_dirs/forestmamba_chm_radius16_qp300_2many_v6/vis_data/ --host=0.0.0.0 --port=6006
 ```
 
 **SSH debugging in VS Code:**

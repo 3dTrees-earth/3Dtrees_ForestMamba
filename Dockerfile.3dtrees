@@ -1,0 +1,35 @@
+ARG BASE_IMAGE=ghcr.io/kgerb/forestmamba-image:3dtrees-base
+FROM ${BASE_IMAGE}
+
+ARG TORCH_CUDA_ARCH_LIST="6.1;7.0;8.0;8.6"
+
+RUN pip install --no-cache-dir \
+    mamba-ssm==1.1.1 \
+    causal-conv1d==1.1.1 \
+    hilbertcurve==2.0.5 \
+    transformers==4.36.0 \
+    importlib-metadata==4.13.0 \
+    wandb==0.16.6 \
+    "laspy[lazrs]==2.5.4"
+
+RUN pip uninstall -y torch-cluster torch-points-kernels \
+    && TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" FORCE_CUDA=1 pip install --no-deps --no-cache-dir torch-cluster==1.6.3 \
+    && TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" FORCE_CUDA=1 pip install --no-deps --no-cache-dir torch-points-kernels==0.7.0
+
+ARG CHECKPOINT_PATH=/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
+COPY . /workspace
+RUN test -s "${CHECKPOINT_PATH}"
+RUN chmod -R a+rX /workspace
+
+COPY replace_mmdetection_files/loops.py /opt/conda/lib/python3.10/site-packages/mmengine/runner/loops.py
+COPY replace_mmdetection_files/base_model.py /opt/conda/lib/python3.10/site-packages/mmengine/model/base_model/base_model.py
+COPY replace_mmdetection_files/transforms_3d.py /opt/conda/lib/python3.10/site-packages/mmdet3d/datasets/transforms/transforms_3d.py
+COPY replace_mmdetection_files/distributed.py /opt/conda/lib/python3.10/site-packages/mmengine/model/wrappers/distributed.py
+RUN chmod a+r \
+    /opt/conda/lib/python3.10/site-packages/mmengine/runner/loops.py \
+    /opt/conda/lib/python3.10/site-packages/mmengine/model/base_model/base_model.py \
+    /opt/conda/lib/python3.10/site-packages/mmdet3d/datasets/transforms/transforms_3d.py \
+    /opt/conda/lib/python3.10/site-packages/mmengine/model/wrappers/distributed.py
+
+ENV PYTHONPATH=/workspace
+ENV WANDB_MODE=disabled
