@@ -1,0 +1,6 @@
+{
+  "passed": true,
+  "common_layers": 19,
+  "candidate_extra_filesystem_layers": 1,
+  "runtime_configuration_identical_except_descriptive_labels": true
+}

@@ -1,0 +1,440 @@
+{
+  "capture": "tree68_10m_capture",
+  "points": 7008010,
+  "windows": 6,
+  "runs": [
+    {
+      "mode": "cached",
+      "windows": [
+        {
+          "window": 0,
+          "queries": 7008010,
+          "mapping_seconds": 9.2238187789917e-06,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 1,
+          "queries": 7008010,
+          "mapping_seconds": 9.213574230670929e-06,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 2,
+          "queries": 7008010,
+          "mapping_seconds": 9.493902325630188e-06,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 3,
+          "queries": 7008010,
+          "mapping_seconds": 9.394250810146332e-06,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 4,
+          "queries": 7008010,
+          "mapping_seconds": 1.1587515473365784e-05,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 5,
+          "queries": 7008010,
+          "mapping_seconds": 9.323470294475555e-06,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        }
+      ],
+      "seconds_including_fixture_io": 17.683835236355662,
+      "mapping_seconds": 5.823653191328049e-05,
+      "final_comparison": {
+        "semantic": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "instances": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "scores": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        }
+      }
+    },
+    {
+      "mode": "original_a",
+      "windows": [
+        {
+          "window": 0,
+          "queries": 7008010,
+          "mapping_seconds": 1.0347110349684954,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 1,
+          "queries": 7008010,
+          "mapping_seconds": 1.034886629320681,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 2,
+          "queries": 7008010,
+          "mapping_seconds": 1.0362490359693766,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 3,
+          "queries": 7008010,
+          "mapping_seconds": 1.0321156028658152,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 4,
+          "queries": 7008010,
+          "mapping_seconds": 1.0348135437816381,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 5,
+          "queries": 7008010,
+          "mapping_seconds": 1.0300807850435376,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        }
+      ],
+      "seconds_including_fixture_io": 16.330330826342106,
+      "mapping_seconds": 6.202856631949544,
+      "final_comparison": {
+        "semantic": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "instances": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "scores": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        }
+      }
+    },
+    {
+      "mode": "hybrid_a",
+      "windows": [
+        {
+          "window": 0,
+          "queries": 7008010,
+          "mapping_seconds": 0.6676606331020594,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 26,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 1,
+          "queries": 7008010,
+          "mapping_seconds": 1.135929043404758,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 36,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 2,
+          "queries": 7008010,
+          "mapping_seconds": 0.9789301222190261,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 37,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 3,
+          "queries": 7008010,
+          "mapping_seconds": 1.3522496409714222,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 31,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 4,
+          "queries": 7008010,
+          "mapping_seconds": 1.0242511611431837,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 32,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 5,
+          "queries": 7008010,
+          "mapping_seconds": 1.5603089109063148,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 32,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        }
+      ],
+      "seconds_including_fixture_io": 17.438972076401114,
+      "mapping_seconds": 6.719329511746764,
+      "final_comparison": {
+        "semantic": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "instances": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "scores": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        }
+      }
+    },
+    {
+      "mode": "hybrid_b",
+      "windows": [
+        {
+          "window": 0,
+          "queries": 7008010,
+          "mapping_seconds": 0.5990459658205509,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 26,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 1,
+          "queries": 7008010,
+          "mapping_seconds": 1.343708056025207,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 36,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 2,
+          "queries": 7008010,
+          "mapping_seconds": 1.382565495558083,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 37,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 3,
+          "queries": 7008010,
+          "mapping_seconds": 0.9835845502093434,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 31,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 4,
+          "queries": 7008010,
+          "mapping_seconds": 1.0860259849578142,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 32,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        },
+        {
+          "window": 5,
+          "queries": 7008010,
+          "mapping_seconds": 1.3849560748785734,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {
+            "queries": 7008010,
+            "fallback_queries": 32,
+            "relative_guard": 7.62939453125e-06,
+            "absolute_guard": 7.52316384526264e-37,
+            "chunks": 8
+          }
+        }
+      ],
+      "seconds_including_fixture_io": 18.204609194770455,
+      "mapping_seconds": 6.779886127449572,
+      "final_comparison": {
+        "semantic": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "instances": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "scores": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        }
+      }
+    },
+    {
+      "mode": "original_b",
+      "windows": [
+        {
+          "window": 0,
+          "queries": 7008010,
+          "mapping_seconds": 1.030876669101417,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 1,
+          "queries": 7008010,
+          "mapping_seconds": 1.0337907141074538,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 2,
+          "queries": 7008010,
+          "mapping_seconds": 1.030115481466055,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 3,
+          "queries": 7008010,
+          "mapping_seconds": 1.032945591956377,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 4,
+          "queries": 7008010,
+          "mapping_seconds": 1.029471061192453,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        },
+        {
+          "window": 5,
+          "queries": 7008010,
+          "mapping_seconds": 1.0318968510255218,
+          "mapping_differences": 0,
+          "winning_score_tie_points": 0,
+          "hybrid_stats": {}
+        }
+      ],
+      "seconds_including_fixture_io": 18.252839035354555,
+      "mapping_seconds": 6.1890963688492775,
+      "final_comparison": {
+        "semantic": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "instances": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        },
+        "scores": {
+          "exact": true,
+          "different_points": 0,
+          "max_absolute": 0.0
+        }
+      }
+    }
+  ],
+  "completed": true
+}

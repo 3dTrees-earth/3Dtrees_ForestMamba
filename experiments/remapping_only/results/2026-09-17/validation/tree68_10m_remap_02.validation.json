@@ -1,0 +1,22 @@
+{
+  "original": "<RUN_ROOT>/inputs/tree68_10m.laz",
+  "output": "<RUN_ROOT>/outputs/tree68_10m_remap_02/input_forestmamba.laz",
+  "point_count": 7008010,
+  "mismatched_dimensions": {},
+  "instances": {
+    "0": 2183129,
+    "1": 566045,
+    "2": 247609,
+    "3": 2392243,
+    "4": 38744,
+    "5": 3543,
+    "6": 414797,
+    "7": 1047041,
+    "8": 52305,
+    "9": 62554
+  },
+  "finite_scores": true,
+  "header_errors": [],
+  "label_errors": [],
+  "passed": true
+}
