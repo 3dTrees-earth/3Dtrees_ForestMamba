@@ -1,0 +1,57 @@
+{
+  "acceptance": "Additional variation reproduced; end-to-end stability acceptance is not met.",
+  "completed_clean_runs": 20,
+  "additional_calibration_runs": 2,
+  "clean_pair_comparisons": 90,
+  "instrumented_runs": 6,
+  "output_preservation_checks_passed": 28,
+  "pinned_source_hashes_verified": 149,
+  "ranked_influences": [
+    {
+      "rank": 1,
+      "factor": "Internal sparse row ordering and incomplete slab ties",
+      "status": "Confirmed in controlled window replay",
+      "evidence": "Identical-input original control changes 976421 matched assignments; freezing the first original replay sequence at all Mamba blocks makes three comparisons exact and reproduces that original replay reference exactly.",
+      "first_changed_block": "unet.u.mamba_block"
+    },
+    {
+      "rank": 2,
+      "factor": "Voxel averaging and quantization boundaries",
+      "status": "Confirmed first divergence; downstream propagation observed under controlled ordering",
+      "evidence": "Same raw points and RNG yield coordinate changes up to 0.00011539459228515625 m. Two changed-mean replays add one sparse voxel and change 46843/46845 assignments; the unchanged-coordinate control changes zero assignments."
+    },
+    {
+      "rank": 3,
+      "factor": "Sparse feature averaging",
+      "status": "Confirmed small numerical and mask changes; no final assignment changes in this window",
+      "evidence": "Frozen original sequences plus changed reduction values alter backbone/logits and 2\u20133 mask entries; matched final assignments remain exact. Identical-feature control is exact."
+    },
+    {
+      "rank": 4,
+      "factor": "Lookup execution effects",
+      "status": "Not established as the cause of excess end-to-end variation",
+      "evidence": "All checked mappings are exact. Frozen-backbone tests have exact decoder predictions and assignments. Before-backbone tests vary within original and hybrid modes; all variation disappears with the original sequence frozen. Synchronization alone does not stabilize the original sequence policy."
+    },
+    {
+      "rank": 5,
+      "factor": "Equal winning-score ties",
+      "status": "Not implicated in the captured windows",
+      "evidence": "No real winning-score ties in either captured window; 20 fixed-mask repetitions per window have identical winners. Other windows are not ruled out."
+    }
+  ],
+  "production_changes": "None; no sorting, model interface, checkpoint or pooling changes.",
+  "recommendation": "Keep the remapping-only optimization experimental. Retain original model logic; use the exact-original-sequence replay as an optimization regression fixture. No general behavior-preserving production fix for the excess variation has yet been validated.",
+  "standalone_reproducer_validation": {
+    "command": "python commands/reproduce.py --label reproducer_smoke_tree59 --assert-original-repeatable",
+    "cli_exit_code": 1,
+    "expected_failure_gate": true,
+    "model_container_exit_code": 0,
+    "completed": true,
+    "container_seconds": 95.251817,
+    "original_control_changed_assignments": 65494,
+    "frozen_reference_exact": true,
+    "frozen_repeats_exact": 3,
+    "frozen_lookup_trials_exact": 12,
+    "results": "outputs/reproducer_smoke_tree59/results.json"
+  }
+}

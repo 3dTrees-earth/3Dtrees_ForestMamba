@@ -4,6 +4,10 @@
 
 Related to 3DT-2029 and 3DT-2031 in [ForestMamba Optimization](https://linear.app/geosense-ufr/project/forestmamba-optimization-c36cc7322374). The complete measured report is [results/2026-09-17/REPORT.md](results/2026-09-17/REPORT.md); the machine-readable summary, all 45 pair comparisons, individual stage records, preservation checks and frozen replay are committed alongside it.
 
+## Additional full-cloud and diagnostic evidence
+
+See [OBSERVATIONS.md](OBSERVATIONS.md) for the separate original-cloud experiment: **26m21s to 11m19s mean processing time (57.07% lower)**, exact mapping audit, and controlled sequence/voxel diagnostics. This gain was observed on the 38.2-million-point cloud, not established by the small baked-image cohort below. Stability still fails. Provide the original dense cloud; retain the existing internal sampling.
+
 ## Model change and original workflow
 
 The base is upstream `main` at `24a68f9c2c0bc407508a7b6990817509674af74b`, also the original source used in the Docker comparison. In `ForAINetV2OneFormer3D_XAwarequery.predict`, the original sliding-window test path does this:
@@ -37,7 +41,7 @@ This avoids exhaustive GPU distance searches on unambiguous geometry, but adds G
 
 The remapping call sits **between the backbone and query-coordinate averaging/decoder**, not at the very end of inference. Its CPU transfers change synchronization and scheduling. Original GPU reductions and ordering remain nondeterministic. Keeping their source identical does not prove that each fresh run realizes identical means, voxel membership, sparse sequence order, query selection or predictions. Equal-score mask assignment also remains unchanged and is not covered by the recorded real-window replay: no winning-score ties occurred in those windows.
 
-These are investigation targets, **not an established causal explanation of the measured excess variation**. We have not shown that the new lookup produces wrong neighbors in a divergent fresh run, nor measured ground-truth accuracy. A fixed seed does not make all original CUDA operations deterministic.
+Controlled diagnostics now confirm sequence sensitivity and voxel-rounding effects in the original model; see [OBSERVATIONS.md](OBSERVATIONS.md). The lookup-specific causal explanation of the measured excess variation remains unresolved. We have not shown that the new lookup produces wrong neighbors in a divergent fresh run, nor measured ground-truth accuracy. A fixed seed does not make all original CUDA operations deterministic.
 
 The frozen replay separates the two questions: hold raw coordinates, sampled points, per-window predictions and merge inputs fixed, then change only the lookup. Replaying the original window/global merge gave exactly equal outputs for the saved fixture. Fresh inference reruns the whole nondeterministic pipeline and currently fails the agreed observed-baseline gate.
 
