@@ -1,0 +1,587 @@
+{
+  "runs": [
+    {
+      "label": "main_01",
+      "variant": "main",
+      "seconds": 1493.4877576828003,
+      "stage_seconds": {
+        "input_conversion": 8.755542,
+        "model_preprocess": 41.69587,
+        "model_inference": 1418.337385,
+        "merge_output": 24.201755
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 1157.9344178047031,
+        "cuda_elapsed_seconds": 1158.0168514404302
+      },
+      "mean_gpu_utilization": 79.6798445456982,
+      "peak_device_mib": 12316.0,
+      "peak_host_bytes": 28295516160,
+      "trees": 70
+    },
+    {
+      "label": "remap_01",
+      "variant": "remap",
+      "seconds": 585.1547212600708,
+      "stage_seconds": {
+        "input_conversion": 8.759446,
+        "model_preprocess": 60.75821,
+        "model_inference": 491.458914,
+        "merge_output": 23.70448
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 231.07157966308296,
+        "cuda_elapsed_seconds": 231.13137719726558
+      },
+      "mean_gpu_utilization": 18.876066917036532,
+      "peak_device_mib": 12040.0,
+      "peak_host_bytes": 25861238784,
+      "trees": 67
+    },
+    {
+      "label": "remap_02",
+      "variant": "remap",
+      "seconds": 574.3464896678925,
+      "stage_seconds": {
+        "input_conversion": 8.948194,
+        "model_preprocess": 51.483184,
+        "model_inference": 489.357604,
+        "merge_output": 24.083867
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 225.50130567606539,
+        "cuda_elapsed_seconds": 225.56126092529297
+      },
+      "mean_gpu_utilization": 19.202989224887034,
+      "peak_device_mib": 12040.0,
+      "peak_host_bytes": 25917181952,
+      "trees": 67
+    },
+    {
+      "label": "main_02",
+      "variant": "main",
+      "seconds": 1614.8931438922882,
+      "stage_seconds": {
+        "input_conversion": 8.734966,
+        "model_preprocess": 75.139066,
+        "model_inference": 1506.785717,
+        "merge_output": 23.775876
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 1147.8676383802667,
+        "cuda_elapsed_seconds": 1147.9501893310548
+      },
+      "mean_gpu_utilization": 72.9749783228044,
+      "peak_device_mib": 12256.0,
+      "peak_host_bytes": 24871120896,
+      "trees": 70
+    },
+    {
+      "label": "main_03",
+      "variant": "main",
+      "seconds": 1634.9520134925842,
+      "stage_seconds": {
+        "input_conversion": 8.817404,
+        "model_preprocess": 111.865814,
+        "model_inference": 1489.494765,
+        "merge_output": 24.299996
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 1148.8083013556898,
+        "cuda_elapsed_seconds": 1148.8930675048832
+      },
+      "mean_gpu_utilization": 72.0937003058104,
+      "peak_device_mib": 12316.0,
+      "peak_host_bytes": 24818827264,
+      "trees": 71
+    },
+    {
+      "label": "remap_03",
+      "variant": "remap",
+      "seconds": 876.6189680099487,
+      "stage_seconds": {
+        "input_conversion": 8.765275,
+        "model_preprocess": 109.841779,
+        "model_inference": 732.770539,
+        "merge_output": 24.776187
+      },
+      "raw_window_remapping": {
+        "calls": 64,
+        "cpu_seconds": 333.93988914974034,
+        "cuda_elapsed_seconds": 333.99889178466793
+      },
+      "mean_gpu_utilization": 12.685948531086312,
+      "peak_device_mib": 12192.0,
+      "peak_host_bytes": 26616827904,
+      "trees": 70
+    }
+  ],
+  "performance": {
+    "main": {
+      "seconds": {
+        "mean": 1581.1109716892242,
+        "min": 1493.4877576828003,
+        "max": 1634.9520134925842
+      },
+      "mean_gpu_utilization": {
+        "mean": 74.91617439143766,
+        "min": 72.0937003058104,
+        "max": 79.6798445456982
+      },
+      "peak_device_mib": {
+        "mean": 12296.0,
+        "min": 12256.0,
+        "max": 12316.0
+      },
+      "peak_host_bytes": {
+        "mean": 25995154773.333332,
+        "min": 24818827264,
+        "max": 28295516160
+      },
+      "stages": {
+        "input_conversion": {
+          "mean": 8.769304,
+          "min": 8.734966,
+          "max": 8.817404
+        },
+        "model_preprocess": {
+          "mean": 76.23358333333333,
+          "min": 41.69587,
+          "max": 111.865814
+        },
+        "model_inference": {
+          "mean": 1471.539289,
+          "min": 1418.337385,
+          "max": 1506.785717
+        },
+        "merge_output": {
+          "mean": 24.092542333333334,
+          "min": 23.775876,
+          "max": 24.299996
+        }
+      },
+      "mapping_cuda_elapsed_seconds": {
+        "mean": 1151.6200360921227,
+        "min": 1147.9501893310548,
+        "max": 1158.0168514404302
+      },
+      "mapping_cpu_seconds": {
+        "mean": 1151.5367858468865,
+        "min": 1147.8676383802667,
+        "max": 1157.9344178047031
+      },
+      "trees": [
+        70,
+        70,
+        71
+      ]
+    },
+    "remap": {
+      "seconds": {
+        "mean": 678.7067263126373,
+        "min": 574.3464896678925,
+        "max": 876.6189680099487
+      },
+      "mean_gpu_utilization": {
+        "mean": 16.921668224336628,
+        "min": 12.685948531086312,
+        "max": 19.202989224887034
+      },
+      "peak_device_mib": {
+        "mean": 12090.666666666666,
+        "min": 12040.0,
+        "max": 12192.0
+      },
+      "peak_host_bytes": {
+        "mean": 26131749546.666668,
+        "min": 25861238784,
+        "max": 26616827904
+      },
+      "stages": {
+        "input_conversion": {
+          "mean": 8.824305,
+          "min": 8.759446,
+          "max": 8.948194
+        },
+        "model_preprocess": {
+          "mean": 74.02772433333334,
+          "min": 51.483184,
+          "max": 109.841779
+        },
+        "model_inference": {
+          "mean": 571.1956856666667,
+          "min": 489.357604,
+          "max": 732.770539
+        },
+        "merge_output": {
+          "mean": 24.188178,
+          "min": 23.70448,
+          "max": 24.776187
+        }
+      },
+      "mapping_cuda_elapsed_seconds": {
+        "mean": 263.5638433024088,
+        "min": 225.56126092529297,
+        "max": 333.99889178466793
+      },
+      "mapping_cpu_seconds": {
+        "mean": 263.5042581629629,
+        "min": 225.50130567606539,
+        "max": 333.93988914974034
+      },
+      "trees": [
+        67,
+        67,
+        70
+      ]
+    }
+  },
+  "global_screens": {
+    "fresh_originals": {
+      "original_within": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0023115523543563166,
+          "baseline_max": 0.003352414408411941,
+          "candidate_min": 0.0023115523543563166,
+          "candidate_max": 0.003352414408411941,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.03166994496685305,
+          "baseline_max": 0.038690738547219605,
+          "candidate_min": 0.03166994496685305,
+          "candidate_max": 0.038690738547219605,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.046389369722535156,
+          "baseline_max": 0.0507855514276101,
+          "candidate_min": 0.046389369722535156,
+          "candidate_max": 0.0507855514276101,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.093027617578471,
+          "baseline_max": 0.11494664006617716,
+          "candidate_min": 0.093027617578471,
+          "candidate_max": 0.11494664006617716,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.0668754437870281,
+          "baseline_max": 0.07782159929514405,
+          "candidate_min": 0.0668754437870281,
+          "candidate_max": 0.07782159929514405,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        }
+      },
+      "remap_within": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0023115523543563166,
+          "baseline_max": 0.003352414408411941,
+          "candidate_min": 0.002647801469435107,
+          "candidate_max": 0.003206079170426035,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.03166994496685305,
+          "baseline_max": 0.038690738547219605,
+          "candidate_min": 0.029371662504404927,
+          "candidate_max": 0.06744761507325714,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.046389369722535156,
+          "baseline_max": 0.0507855514276101,
+          "candidate_min": 0.04080363512330476,
+          "candidate_max": 0.07843393394556653,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.093027617578471,
+          "baseline_max": 0.11494664006617716,
+          "candidate_min": 0.0849494106751878,
+          "candidate_max": 0.18333254155523426,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.0668754437870281,
+          "baseline_max": 0.07782159929514405,
+          "candidate_min": 0.06719595676709968,
+          "candidate_max": 0.12905387190253723,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        }
+      },
+      "original_vs_remap": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0023115523543563166,
+          "baseline_max": 0.003352414408411941,
+          "candidate_min": 0.002534104407404869,
+          "candidate_max": 0.00398782499195427,
+          "candidate_exceedances": [
+            1,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.03166994496685305,
+          "baseline_max": 0.038690738547219605,
+          "candidate_min": 0.031433363994548436,
+          "candidate_max": 0.0849779798314394,
+          "candidate_exceedances": [
+            1,
+            3,
+            4,
+            7,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.046389369722535156,
+          "baseline_max": 0.0507855514276101,
+          "candidate_min": 0.038732040104282994,
+          "candidate_max": 0.10181310171238667,
+          "candidate_exceedances": [
+            1,
+            3,
+            4,
+            7,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.093027617578471,
+          "baseline_max": 0.11494664006617716,
+          "candidate_min": 0.09126156029250043,
+          "candidate_max": 0.22830910220345813,
+          "candidate_exceedances": [
+            1,
+            4,
+            7,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.0668754437870281,
+          "baseline_max": 0.07782159929514405,
+          "candidate_min": 0.06797406116760703,
+          "candidate_max": 0.15278278969263276,
+          "candidate_exceedances": [
+            1,
+            3,
+            4,
+            7,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        }
+      }
+    },
+    "historical_originals": {
+      "original_within": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0026181470561569276,
+          "baseline_max": 0.004269555004775105,
+          "candidate_min": 0.0023115523543563166,
+          "candidate_max": 0.003352414408411941,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.027687825766685714,
+          "baseline_max": 0.044179657899569236,
+          "candidate_min": 0.03166994496685305,
+          "candidate_max": 0.038690738547219605,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.037767996852496766,
+          "baseline_max": 0.059788034546318314,
+          "candidate_min": 0.046389369722535156,
+          "candidate_max": 0.0507855514276101,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.08062758888228261,
+          "baseline_max": 0.12855391534331362,
+          "candidate_min": 0.093027617578471,
+          "candidate_max": 0.11494664006617716,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.06431839423903796,
+          "baseline_max": 0.09714660410022007,
+          "candidate_min": 0.0668754437870281,
+          "candidate_max": 0.07782159929514405,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        }
+      },
+      "remap_within": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0026181470561569276,
+          "baseline_max": 0.004269555004775105,
+          "candidate_min": 0.002647801469435107,
+          "candidate_max": 0.003206079170426035,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.027687825766685714,
+          "baseline_max": 0.044179657899569236,
+          "candidate_min": 0.029371662504404927,
+          "candidate_max": 0.06744761507325714,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.037767996852496766,
+          "baseline_max": 0.059788034546318314,
+          "candidate_min": 0.04080363512330476,
+          "candidate_max": 0.07843393394556653,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.08062758888228261,
+          "baseline_max": 0.12855391534331362,
+          "candidate_min": 0.0849494106751878,
+          "candidate_max": 0.18333254155523426,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.06431839423903796,
+          "baseline_max": 0.09714660410022007,
+          "candidate_min": 0.06719595676709968,
+          "candidate_max": 0.12905387190253723,
+          "candidate_exceedances": [
+            1,
+            2
+          ],
+          "persistent_exceedance": false
+        }
+      },
+      "original_vs_remap": {
+        "semantic_disagreement": {
+          "baseline_min": 0.0026181470561569276,
+          "baseline_max": 0.004269555004775105,
+          "candidate_min": 0.002534104407404869,
+          "candidate_max": 0.00398782499195427,
+          "candidate_exceedances": [],
+          "persistent_exceedance": false
+        },
+        "assigned_unassigned_disagreement": {
+          "baseline_min": 0.027687825766685714,
+          "baseline_max": 0.044179657899569236,
+          "candidate_min": 0.031433363994548436,
+          "candidate_max": 0.0849779798314394,
+          "candidate_exceedances": [
+            1,
+            4,
+            7,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "instance_disagreement": {
+          "baseline_min": 0.037767996852496766,
+          "baseline_max": 0.059788034546318314,
+          "candidate_min": 0.038732040104282994,
+          "candidate_max": 0.10181310171238667,
+          "candidate_exceedances": [
+            1,
+            4,
+            7
+          ],
+          "persistent_exceedance": false
+        },
+        "one_minus_ari": {
+          "baseline_min": 0.08062758888228261,
+          "baseline_max": 0.12855391534331362,
+          "candidate_min": 0.09126156029250043,
+          "candidate_max": 0.22830910220345813,
+          "candidate_exceedances": [
+            1,
+            4,
+            7,
+            8,
+            9
+          ],
+          "persistent_exceedance": false
+        },
+        "score_mae": {
+          "baseline_min": 0.06431839423903796,
+          "baseline_max": 0.09714660410022007,
+          "candidate_min": 0.06797406116760703,
+          "candidate_max": 0.15278278969263276,
+          "candidate_exceedances": [
+            1,
+            4,
+            7
+          ],
+          "persistent_exceedance": false
+        }
+      }
+    }
+  },
+  "audit": {
+    "windows": 64,
+    "point_window_mappings": 1318704290,
+    "differences": 0
+  },
+  "interpretation": "Three fresh runs per variant, paired comparisons correlated. Original model source retained except one raw-window nearest-neighbor lookup. Audit verifies every mapping on its full run and is excluded from performance samples. No ground-truth accuracy or statistical-equivalence claim; baseline nondeterminism persists. Local tree IDs refer to this experiment main_01, not earlier reports.",
+  "source_run": "remapping-only-20260916T132635Z",
+  "input_points": 38206792,
+  "replicates_per_variant": 3,
+  "source_equivalence": "Model and both helper ASTs match PR source, excluding module docstrings.",
+  "timing_note": "Instrumented run; mapping CUDA event durations include CPU gaps. Separate audit excluded from timing."
+}

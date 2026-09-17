@@ -27,3 +27,6 @@ paper
 logs
 wait_and_run.sh
 idea.md
+# Keep the remapping experiment's documented regression tests.
+!experiments/remapping_only/tests/
+!experiments/remapping_only/tests/*.py

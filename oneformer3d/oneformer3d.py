@@ -14,6 +14,7 @@ import numpy as np
 from tools.base_modules import Seq, MLP, FastBatchNorm1d
 from .panoptic_losses import offset_loss, discriminative_loss, FastFocalLoss
 from torch_cluster import fps, knn as cluster_knn
+from .remapping import remapping_knn
 import re
 import math
 import collections 
@@ -2647,11 +2648,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
             tree_indices = torch.where(
                 bi_semantic_logits.argmax(dim=1) == wood_class)[0]
 
-            # (4) pc1 -> pc3 nearest neighbor on GPU via torch_cluster.knn.
+            # (4) pc1 -> pc3 nearest neighbor via the experimental remapping adapter.
             # cluster_knn(x, y, k) returns (row, col): col[i] is the index in x
             # nearest to y[row[i]].  With k=1 row = arange(N_pc1) so col is the
-            # direct NN index — no big intermediate matrix, stays on GPU.
-            _assign    = cluster_knn(pc3.float(), pc1.float(), k=1)
+            # direct NN index. The adapter uses CPU search with CUDA fallback.
+            _assign    = remapping_knn(pc3.float(), pc1.float(), k=1)
             nn_idx_pc1 = _assign[1]   # (N_pc1,) index into pc3
 
             if tree_indices.numel() > 1:

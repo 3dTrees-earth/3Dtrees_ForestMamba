@@ -1,0 +1,544 @@
+{
+  "cross_variant_excess_observed": true,
+  "group": "tree68_10m",
+  "points": 7008010,
+  "pairs": 45,
+  "performance": {
+    "main": {
+      "mean_seconds": 116.4073413848877,
+      "median_seconds": 106.85531544685364,
+      "min_seconds": 80.41947364807129,
+      "max_seconds": 173.59617924690247
+    },
+    "remap": {
+      "mean_seconds": 122.86278443336487,
+      "median_seconds": 145.08888292312622,
+      "min_seconds": 79.87651634216309,
+      "max_seconds": 153.2388470172882
+    }
+  },
+  "runs": [
+    {
+      "label": "tree68_10m_main_01",
+      "seconds": 133.1050579547882,
+      "stages": {
+        "input_conversion": 1.52741,
+        "model_preprocess": 49.009771,
+        "model_inference": 76.985646,
+        "merge_output": 4.457909
+      },
+      "mean_gpu_utilization": 5.561011904761905,
+      "peak_device_mib": 4536.0
+    },
+    {
+      "label": "tree68_10m_remap_01",
+      "seconds": 153.2388470172882,
+      "stages": {
+        "input_conversion": 1.5574,
+        "model_preprocess": 49.875562,
+        "model_inference": 96.663806,
+        "merge_output": 3.974984
+      },
+      "mean_gpu_utilization": 1.0943152454780363,
+      "peak_device_mib": 2896.0
+    },
+    {
+      "label": "tree68_10m_main_02",
+      "seconds": 173.59617924690247,
+      "stages": {
+        "input_conversion": 1.551739,
+        "model_preprocess": 43.869753,
+        "model_inference": 122.454675,
+        "merge_output": 4.424373
+      },
+      "mean_gpu_utilization": 4.189127972819932,
+      "peak_device_mib": 3126.0
+    },
+    {
+      "label": "tree68_10m_remap_02",
+      "seconds": 153.09892654418945,
+      "stages": {
+        "input_conversion": 1.560777,
+        "model_preprocess": 44.778976,
+        "model_inference": 98.963985,
+        "merge_output": 4.430218
+      },
+      "mean_gpu_utilization": 1.1082474226804124,
+      "peak_device_mib": 3200.0
+    },
+    {
+      "label": "tree68_10m_main_03",
+      "seconds": 88.06068062782288,
+      "stages": {
+        "input_conversion": 1.571158,
+        "model_preprocess": 36.306182,
+        "model_inference": 41.931071,
+        "merge_output": 4.389237
+      },
+      "mean_gpu_utilization": 7.640425531914894,
+      "peak_device_mib": 3160.0
+    },
+    {
+      "label": "tree68_10m_remap_03",
+      "seconds": 145.08888292312622,
+      "stages": {
+        "input_conversion": 1.529802,
+        "model_preprocess": 38.165166,
+        "model_inference": 99.295825,
+        "merge_output": 4.502993
+      },
+      "mean_gpu_utilization": 1.1530201342281878,
+      "peak_device_mib": 2898.0
+    },
+    {
+      "label": "tree68_10m_main_04",
+      "seconds": 106.85531544685364,
+      "stages": {
+        "input_conversion": 1.546868,
+        "model_preprocess": 35.448287,
+        "model_inference": 64.332167,
+        "merge_output": 4.372341
+      },
+      "mean_gpu_utilization": 6.680890538033395,
+      "peak_device_mib": 3064.0
+    },
+    {
+      "label": "tree68_10m_remap_04",
+      "seconds": 79.87651634216309,
+      "stages": {
+        "input_conversion": 1.564292,
+        "model_preprocess": 33.767821,
+        "model_inference": 39.177465,
+        "merge_output": 4.409207
+      },
+      "mean_gpu_utilization": 2.1160493827160494,
+      "peak_device_mib": 3068.0
+    },
+    {
+      "label": "tree68_10m_main_05",
+      "seconds": 80.41947364807129,
+      "stages": {
+        "input_conversion": 1.538405,
+        "model_preprocess": 34.638309,
+        "model_inference": 39.200064,
+        "merge_output": 4.391905
+      },
+      "mean_gpu_utilization": 9.447174447174447,
+      "peak_device_mib": 5414.0
+    },
+    {
+      "label": "tree68_10m_remap_05",
+      "seconds": 83.01074934005737,
+      "stages": {
+        "input_conversion": 1.542879,
+        "model_preprocess": 34.400912,
+        "model_inference": 42.255912,
+        "merge_output": 4.345869
+      },
+      "mean_gpu_utilization": 2.0141176470588236,
+      "peak_device_mib": 3186.0
+    }
+  ],
+  "global_screens": {
+    "remap_within": {
+      "semantic_disagreement": {
+        "baseline_min": 0.0005061351225240651,
+        "baseline_max": 0.003602021115837406,
+        "candidate_min": 0.0006743711838310684,
+        "candidate_max": 0.002801793947211806,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "assigned_unassigned_disagreement": {
+        "baseline_min": 0.0014744556585963853,
+        "baseline_max": 0.06801031961997772,
+        "candidate_min": 0.018925772080804704,
+        "candidate_max": 0.11734929031208574,
+        "candidate_exceedances": [
+          2,
+          5,
+          7,
+          8,
+          10
+        ],
+        "persistent_exceedance": false
+      },
+      "instance_disagreement": {
+        "baseline_min": 0.0017206025676332892,
+        "baseline_max": 0.06841243091833493,
+        "candidate_min": 0.021944603389549955,
+        "candidate_max": 0.11995587905839178,
+        "candidate_exceedances": [
+          2,
+          5,
+          7,
+          8,
+          10
+        ],
+        "persistent_exceedance": false
+      },
+      "one_minus_ari": {
+        "baseline_min": 0.0037887840022522434,
+        "baseline_max": 0.21333235105415183,
+        "candidate_min": 0.0599868654856166,
+        "candidate_max": 0.3308091182509323,
+        "candidate_exceedances": [
+          2,
+          5,
+          7,
+          8,
+          10
+        ],
+        "persistent_exceedance": false
+      },
+      "score_mae": {
+        "baseline_min": 0.008519880400743167,
+        "baseline_max": 0.11775434984566463,
+        "candidate_min": 0.04008452470468525,
+        "candidate_max": 0.20415057883249557,
+        "candidate_exceedances": [
+          2,
+          5,
+          7,
+          8,
+          10
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "original_vs_remap": {
+      "semantic_disagreement": {
+        "baseline_min": 0.0005061351225240651,
+        "baseline_max": 0.003602021115837406,
+        "candidate_min": 0.00043778476343503403,
+        "candidate_max": 0.0038585846766771015,
+        "candidate_exceedances": [
+          16
+        ],
+        "persistent_exceedance": false
+      },
+      "assigned_unassigned_disagreement": {
+        "baseline_min": 0.0014744556585963853,
+        "baseline_max": 0.06801031961997772,
+        "candidate_min": 0.0011445474535567435,
+        "candidate_max": 0.11414267388317079,
+        "candidate_exceedances": [
+          3,
+          5,
+          8,
+          10,
+          13,
+          15,
+          19,
+          23,
+          25
+        ],
+        "persistent_exceedance": false
+      },
+      "instance_disagreement": {
+        "baseline_min": 0.0017206025676332892,
+        "baseline_max": 0.06841243091833493,
+        "candidate_min": 0.0015166930412484625,
+        "candidate_max": 0.11446844396626144,
+        "candidate_exceedances": [
+          3,
+          5,
+          8,
+          10,
+          13,
+          15,
+          19,
+          23,
+          25
+        ],
+        "persistent_exceedance": false
+      },
+      "one_minus_ari": {
+        "baseline_min": 0.0037887840022522434,
+        "baseline_max": 0.21333235105415183,
+        "candidate_min": 0.003034056454625067,
+        "candidate_max": 0.3247964579936393,
+        "candidate_exceedances": [
+          3,
+          5,
+          8,
+          10,
+          13,
+          15,
+          19,
+          23,
+          25
+        ],
+        "persistent_exceedance": false
+      },
+      "score_mae": {
+        "baseline_min": 0.008519880400743167,
+        "baseline_max": 0.11775434984566463,
+        "candidate_min": 0.010942486791245123,
+        "candidate_max": 0.1912676280895622,
+        "candidate_exceedances": [
+          3,
+          5,
+          8,
+          10,
+          13,
+          15,
+          19,
+          23,
+          25
+        ],
+        "persistent_exceedance": false
+      }
+    }
+  },
+  "local_screens": {
+    "1": {
+      "fragmentation": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0007459974368293197,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0007459974368293197,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      }
+    },
+    "2": {
+      "fragmentation": {
+        "baseline_min": 3.0359899257180007e-05,
+        "baseline_max": 8.28391536874483e-05,
+        "candidate_min": 0.0,
+        "candidate_max": 8.28391536874483e-05,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.002800050137205059,
+        "baseline_max": 0.15852768367413766,
+        "candidate_min": 0.0003621502268535044,
+        "candidate_max": 0.2959825612738667,
+        "candidate_exceedances": [
+          3,
+          5
+        ],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0007779247339460974,
+        "baseline_max": 0.00092863467806225,
+        "candidate_min": 6.808908273657111e-05,
+        "candidate_max": 0.0010800739058865153,
+        "candidate_exceedances": [
+          1
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "3": {
+      "fragmentation": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.00368639167309175,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0025138139295810846,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.0011284052942688255,
+        "baseline_max": 0.003497654844512979,
+        "candidate_min": 1.2047031611410948e-05,
+        "candidate_max": 0.0012448599331791313,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.00010038184077835618,
+        "baseline_max": 0.0036813217427867227,
+        "candidate_min": 0.00010038184000768083,
+        "candidate_max": 0.0025129957561988727,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      }
+    },
+    "4": {
+      "fragmentation": {
+        "baseline_min": 0.005946379172160604,
+        "baseline_max": 0.01724449959926575,
+        "candidate_min": 0.0,
+        "candidate_max": 0.15476098141110164,
+        "candidate_exceedances": [
+          4
+        ],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.005713694769771711,
+        "candidate_min": 0.0,
+        "candidate_max": 0.5691977558882081,
+        "candidate_exceedances": [
+          4
+        ],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0076750792168124105,
+        "baseline_max": 0.022977038956122763,
+        "candidate_min": 0.012197022115565443,
+        "candidate_max": 0.4222403038070134,
+        "candidate_exceedances": [
+          1,
+          2,
+          4
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "5": {
+      "fragmentation": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.00704270439848902,
+        "candidate_min": 0.0,
+        "candidate_max": 0.007090722837569626,
+        "candidate_exceedances": [
+          4
+        ],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0,
+        "candidate_min": 0.0,
+        "candidate_max": 9.603687816121391e-05,
+        "candidate_exceedances": [
+          3
+        ],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0022039799405883667,
+        "baseline_max": 0.007037226484983103,
+        "candidate_min": 0.0038744225764770755,
+        "candidate_max": 0.00801829123068862,
+        "candidate_exceedances": [
+          2,
+          4
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "6": {
+      "fragmentation": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0008945935433683392,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0015841024009052014,
+        "candidate_exceedances": [
+          2,
+          3
+        ],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.004490647431137513,
+        "candidate_min": 0.0,
+        "candidate_max": 0.0013913935150807963,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0004735919475231848,
+        "baseline_max": 0.0020523194573811294,
+        "candidate_min": 0.00085342851710553,
+        "candidate_max": 0.01123854774678393,
+        "candidate_exceedances": [
+          4
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "7": {
+      "fragmentation": {
+        "baseline_min": 0.0,
+        "baseline_max": 0.0012685694402829997,
+        "candidate_min": 0.0,
+        "candidate_max": 0.001957221422150914,
+        "candidate_exceedances": [
+          1,
+          2
+        ],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 6.765703681509333e-05,
+        "baseline_max": 0.0002150527241622609,
+        "candidate_min": 0.0,
+        "candidate_max": 6.765703681509333e-05,
+        "candidate_exceedances": [],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.0011705444550819347,
+        "baseline_max": 0.0025545055288410845,
+        "candidate_min": 0.0013031138448323693,
+        "candidate_max": 0.025150225308518383,
+        "candidate_exceedances": [
+          2,
+          4
+        ],
+        "persistent_exceedance": false
+      }
+    },
+    "8": {
+      "fragmentation": {
+        "baseline_min": 0.0010677838303488317,
+        "baseline_max": 0.001719103441915127,
+        "candidate_min": 5.8951556083372714e-05,
+        "candidate_max": 0.0018274982385845541,
+        "candidate_exceedances": [
+          1
+        ],
+        "persistent_exceedance": false
+      },
+      "lost_to_background": {
+        "baseline_min": 2.852494649195454e-06,
+        "baseline_max": 0.00341538692663669,
+        "candidate_min": 0.00017305134205119086,
+        "candidate_max": 0.0034581743463746217,
+        "candidate_exceedances": [
+          5
+        ],
+        "persistent_exceedance": false
+      },
+      "mixing_with_other_reference_trees": {
+        "baseline_min": 0.001248741940166718,
+        "baseline_max": 0.0017843050757811692,
+        "candidate_min": 0.00012550374802051647,
+        "candidate_max": 0.0018924377941531407,
+        "candidate_exceedances": [
+          1
+        ],
+        "persistent_exceedance": false
+      }
+    }
+  },
+  "streamed_comparator_verified": true,
+  "excess_variation_observed": true,
+  "interpretation": "Observed envelope, not a significance test. Ten original pairs share five runs; cross pairs are correlated. Cropping changes spatial context; diagnosis must be confirmed with controlled replays."
+}
