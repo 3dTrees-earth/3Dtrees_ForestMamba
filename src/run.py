@@ -1,94 +1,109 @@
 #!/usr/bin/env python3
-"""Galaxy entrypoint for ForestMamba LAS/LAZ inference."""
+"""Galaxy-compatible ForestMamba entrypoint.
+
+The deployed Galaxy tool calls /workspace/src/run.py. Keep that stable and
+delegate to the richer batch runner used by local validation.
+"""
 
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 
-_SRC_DIR = Path(__file__).parent.resolve()
-_REPO_DIR = _SRC_DIR.parent
-_SCRIPTS_DIR = _REPO_DIR / "scripts"
-for path in (_SRC_DIR, _SCRIPTS_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
-try:
-    from parameters import Parameters, print_params
-except ImportError as exc:
-    print(f"Error: Could not import parameters.py: {exc}")
-    sys.exit(1)
+DEFAULT_REPO_DIR = Path("/workspace")
+DEFAULT_CHECKPOINT = (
+    DEFAULT_REPO_DIR
+    / "work_dirs"
+    / "forestmamba_chm_radius16_qp300_2many_v6"
+    / "epoch_3000_fix.pth"
+)
 
 
-def build_batch_args(params: Parameters) -> argparse.Namespace:
-    inputs = [str(path) for path in params.all_inputs()]
-    if not inputs and params.input_list is None:
-        raise ValueError(
-            "No input LAS/LAZ file was provided. Use --dataset-path, --input, "
-            "--input-paths, or --input-list."
-        )
-
-    return argparse.Namespace(
-        inputs=inputs,
-        input_list=str(params.input_list) if params.input_list else None,
-        output_dir=str(params.output_dir),
-        work_dir=str(params.work_dir),
-        repo_dir=str(params.repo_dir),
-        checkpoint=str(params.checkpoint),
-        config_base=str(params.config_base),
-        gpu_device=params.gpu_device,
-        preprocess_workers=params.preprocess_workers,
-        chunk_size=params.chunk_size,
-        tile_size=params.tile_size,
-        tile_overlap=params.tile_overlap,
-        tile_max_points=params.tile_max_points,
-        keep_tile_work=params.keep_tile_work,
-        crop_center_x=params.crop_center_x,
-        crop_center_y=params.crop_center_y,
-        crop_radius=params.crop_radius,
-        prediction_dir=str(params.prediction_dir) if params.prediction_dir else None,
-        skip_inference=params.skip_inference,
-        skip_preprocess=params.skip_preprocess,
-        semantic_dim=params.semantic_dim,
-        instance_dim=params.instance_dim,
-        score_dim=params.score_dim,
-        benchmark_stage_log=(
-            str(params.benchmark_stage_log) if params.benchmark_stage_log else None
-        ),
-        bluepoint_iterations=params.bluepoint_iterations,
-        bluepoint_score_threshold=params.bluepoint_score_threshold,
-        bluepoint_second_pass_threshold=params.bluepoint_second_pass_threshold,
-        spatial_match_tolerance=params.spatial_match_tolerance,
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run ForestMamba on a LAS/LAZ file.")
+    parser.add_argument("--dataset-path", required=True, help="Input LAS/LAZ path.")
+    parser.add_argument("--output-dir", required=True, help="Output directory.")
+    parser.add_argument("--work-dir", required=True, help="Scratch work directory.")
+    parser.add_argument(
+        "--repo-dir",
+        default=str(DEFAULT_REPO_DIR),
+        help="ForestMamba repository root inside the container.",
     )
+    parser.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT))
+    parser.add_argument(
+        "--config-base",
+        default=str(
+            DEFAULT_REPO_DIR
+            / "configs"
+            / "ForAINetv2"
+            / "forestmamba_chm_radius16_qp300_2many_v6.py"
+        ),
+    )
+    parser.add_argument("--preprocess-workers", default="1")
+    parser.add_argument("--chunk-size", default="1000000")
+    parser.add_argument("--semantic-dim", default="PredSemantic_FM")
+    parser.add_argument("--instance-dim", default="PredInstance_FM")
+    parser.add_argument("--score-dim", default="PredScore_FM")
+    parser.add_argument("--bluepoint-iterations", default=None)
+    parser.add_argument("--bluepoint-second-pass-threshold", default="0.01")
+    parser.add_argument("--spatial-match-tolerance", default="0.01")
+    return parser.parse_args()
 
 
-def load_batch_module():
-    try:
-        import forest_mamba_laz_batch
-    except ImportError as exc:
-        print(f"Error: Could not import ForestMamba batch wrapper: {exc}")
-        sys.exit(1)
-    return forest_mamba_laz_batch
+def normalized_checkpoint(path: str) -> str:
+    checkpoint = Path(path)
+    if checkpoint.exists():
+        return str(checkpoint)
+    if checkpoint.name == "v6_epoch_1500_fix.pth" and DEFAULT_CHECKPOINT.exists():
+        print(
+            f"[compat] Checkpoint {checkpoint} not found; using {DEFAULT_CHECKPOINT}",
+            flush=True,
+        )
+        return str(DEFAULT_CHECKPOINT)
+    return str(checkpoint)
 
 
-def run(params: Parameters) -> None:
-    batch_args = build_batch_args(params)
-    load_batch_module().run_batch(batch_args)
-
-
-def main(argv: list[str] | None = None) -> None:
-    try:
-        params = Parameters.from_cli(argv)
-        if params.show_params:
-            print_params(params)
-            return
-        run(params)
-    except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
+def main() -> int:
+    args = parse_args()
+    repo_dir = Path(args.repo_dir)
+    runner = repo_dir / "scripts" / "forest_mamba_laz_batch.py"
+    command = [
+        sys.executable,
+        str(runner),
+        "--input",
+        args.dataset_path,
+        "--output-dir",
+        args.output_dir,
+        "--work-dir",
+        args.work_dir,
+        "--repo-dir",
+        str(repo_dir),
+        "--checkpoint",
+        normalized_checkpoint(args.checkpoint),
+        "--config-base",
+        args.config_base,
+        "--preprocess-workers",
+        str(args.preprocess_workers),
+        "--chunk-size",
+        str(args.chunk_size),
+        "--semantic-dim",
+        args.semantic_dim,
+        "--instance-dim",
+        args.instance_dim,
+        "--score-dim",
+        args.score_dim,
+        "--bluepoint-second-pass-threshold",
+        str(args.bluepoint_second_pass_threshold),
+        "--spatial-match-tolerance",
+        str(args.spatial_match_tolerance),
+    ]
+    if args.bluepoint_iterations is not None:
+        command.extend(["--bluepoint-iterations", str(args.bluepoint_iterations)])
+    return subprocess.run(command, check=False).returncode
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

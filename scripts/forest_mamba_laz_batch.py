@@ -25,7 +25,7 @@ from scipy.spatial import cKDTree
 
 DEFAULT_CHECKPOINT = (
     "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/"
-    "v6_epoch_1500_fix.pth"
+    "epoch_3000_fix.pth"
 )
 DEFAULT_CONFIG_BASE = (
     "/workspace/configs/ForAINetv2/"
@@ -43,7 +43,7 @@ PLACEHOLDER_PLY_DTYPE = np.dtype(
 LAZ_BACKEND = laspy.LazBackend.Lazrs
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Batch ForestMamba inference for LAS/LAZ point clouds."
     )
@@ -82,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--gpu-device",
         default="",
-        help="CUDA device id for inference. Leave empty to let the runtime assign the GPU.",
+        help="CUDA device id for inference. Use an empty value to leave CUDA_VISIBLE_DEVICES unchanged.",
     )
     parser.add_argument(
         "--preprocess-workers",
@@ -183,10 +183,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bluepoint-iterations",
         type=int,
-        default=0,
+        default=None,
         help=(
-            "Run iterative bluepoint inference this many rounds. "
-            "0 keeps the standard one-pass inference path."
+            "Run at most this many bluepoint rounds; a further round runs only "
+            "while the unresolved bluepoint share exceeds "
+            "--bluepoint-second-pass-threshold (0 always runs every round). "
+            "Omit to allow up to 1 + --bluepoint-max-additional-runs rounds. "
+            "Use 0 to keep the standard one-pass inference path."
+        ),
+    )
+    parser.add_argument(
+        "--bluepoint-max-additional-runs",
+        type=int,
+        default=3,
+        help=(
+            "Maximum additional bluepoint passes in threshold-driven mode. "
+            "Default 3 means up to 4 total bluepoint rounds. Ignored when "
+            "--bluepoint-iterations is set."
         ),
     )
     parser.add_argument(
@@ -200,8 +213,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=0.01,
         help=(
-            "Run the second bluepoint pass only when more than this fraction "
-            "of first-pass points are non-ground with raw instance_pred == -1. "
+            "Keep running additional bluepoint passes while more than this "
+            "fraction of the original point count remains unresolved. "
             "Default 0.01 = 1%%."
         ),
     )
@@ -214,7 +227,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "PLY predictions back onto the original LAS/LAZ rows."
         ),
     )
-    return parser.parse_args(argv)
+    return parser.parse_args()
 
 
 def safe_stem(path: Path) -> str:
@@ -689,48 +702,49 @@ def load_prediction_ply(
     raise ValueError(f"Unsupported bluepoint PLY fields in {prediction_ply}: {sorted(names)}")
 
 
-def first_pass_unassigned_ratio(prediction_dir: Path, sample_id: str) -> dict[str, object]:
-    """Estimate first-pass non-ground points with raw instance_pred == -1."""
-    total_points = 0
-    unassigned_points = 0
-    parts: list[dict[str, object]] = []
+def ply_vertex_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return int(len(PlyData.read(str(path))["vertex"].data))
 
-    base_path = prediction_dir / f"{sample_id}_1.ply"
-    if base_path.exists():
-        _, base_semantic, base_instance, _ = load_prediction_ply(base_path)
-        base_unassigned = int(
-            np.count_nonzero((base_semantic != 0) & (base_instance < 0))
+
+def load_forainet_coordinate_offset(
+    dataset_root: Path,
+    sample_id: str,
+) -> np.ndarray | None:
+    offset_path = (
+        dataset_root
+        / "forainetv2_instance_data"
+        / f"{sample_id}_offsets.npy"
+    )
+    if not offset_path.exists():
+        return None
+    offset = np.asarray(np.load(offset_path), dtype=np.float64)
+    if offset.shape != (3,):
+        raise ValueError(
+            f"Unexpected coordinate offset shape in {offset_path}: {offset.shape}"
         )
-        total_points = int(len(base_instance))
-        unassigned_points = base_unassigned
-        parts.append({
-            "path": str(base_path),
-            "point_count": int(len(base_instance)),
-            "unassigned_point_count": base_unassigned,
-        })
-    else:
-        bluepoint_path = prediction_dir / f"{sample_id}_bluepoints_1.ply"
-        if bluepoint_path.exists():
-            _, _, blue_instance, _ = load_prediction_ply(bluepoint_path)
-            blue_unassigned = int(len(blue_instance))
-            total_points = int(len(blue_instance))
-            unassigned_points = blue_unassigned
-            parts.append({
-                "path": str(bluepoint_path),
-                "point_count": int(len(blue_instance)),
-                "unassigned_point_count": blue_unassigned,
-            })
+    return offset
 
-    if total_points == 0:
-        raise FileNotFoundError(
-            f"No first-pass bluepoint outputs found for {sample_id!r} in {prediction_dir}"
-        )
 
+def bluepoint_unresolved_ratio(
+    prediction_dir: Path,
+    sample_id: str,
+    iteration: int,
+    original_point_count: int,
+) -> dict[str, object]:
+    """Measure unresolved bluepoints produced by one bluepoint round."""
+    if original_point_count <= 0:
+        raise ValueError("original_point_count must be positive")
+    bluepoint_path = prediction_dir / f"{sample_id}_bluepoints_{iteration}.ply"
+    unresolved_points = ply_vertex_count(bluepoint_path)
     return {
-        "unassigned_ratio": float(unassigned_points / total_points),
-        "unassigned_point_count": unassigned_points,
-        "point_count": total_points,
-        "parts": parts,
+        "iteration": int(iteration),
+        "path": str(bluepoint_path),
+        "path_exists": bluepoint_path.exists(),
+        "unassigned_ratio": float(unresolved_points / original_point_count),
+        "unassigned_point_count": int(unresolved_points),
+        "point_count": int(original_point_count),
     }
 
 
@@ -740,11 +754,20 @@ def locate_prediction_rows(
     *,
     tolerance: float,
     chunk_size: int,
+    coordinate_offset: np.ndarray | None = None,
 ) -> np.ndarray:
     """Map prediction coordinates back to original LAS/LAZ row indices."""
     if len(points) == 0:
         return np.empty(0, dtype=np.int64)
-    tree = cKDTree(points)
+    match_points = points
+    if coordinate_offset is not None:
+        offset = np.asarray(coordinate_offset, dtype=np.float64)
+        if offset.shape != (3,):
+            raise ValueError(
+                f"Coordinate offset must have shape (3,), got {offset.shape}"
+            )
+        match_points = points + offset
+    tree = cKDTree(match_points)
     row_indices = np.full(len(points), -1, dtype=np.int64)
     best_distances = np.full(len(points), np.inf, dtype=np.float64)
     start = 0
@@ -781,25 +804,155 @@ def locate_prediction_rows(
             start += len(chunk)
     missing = np.flatnonzero(row_indices < 0)
     if len(missing):
+        start = 0
+        with laspy.open(str(input_path), laz_backend=LAZ_BACKEND) as reader:
+            for chunk in reader.chunk_iterator(chunk_size):
+                chunk_points = np.column_stack(
+                    [
+                        np.asarray(chunk.x, dtype=np.float64),
+                        np.asarray(chunk.y, dtype=np.float64),
+                        np.asarray(chunk.z, dtype=np.float64),
+                    ]
+                )
+                if len(chunk_points):
+                    chunk_tree = cKDTree(chunk_points)
+                    distances, local_rows = chunk_tree.query(
+                        match_points[missing],
+                        k=1,
+                        distance_upper_bound=tolerance,
+                    )
+                    valid = np.isfinite(distances) & (distances <= tolerance)
+                    if np.any(valid):
+                        matched_overlay = missing[valid].astype(np.int64, copy=False)
+                        candidate_rows = start + local_rows[valid].astype(
+                            np.int64,
+                            copy=False,
+                        )
+                        candidate_distances = distances[valid]
+                        improves = candidate_distances < best_distances[matched_overlay]
+                        if np.any(improves):
+                            improved_overlay = matched_overlay[improves]
+                            row_indices[improved_overlay] = candidate_rows[improves]
+                            best_distances[improved_overlay] = candidate_distances[
+                                improves
+                            ]
+                start += len(chunk)
+        missing = np.flatnonzero(row_indices < 0)
+    if len(missing):
+        offset_note = (
+            ""
+            if coordinate_offset is None
+            else f" after applying coordinate offset {coordinate_offset.tolist()}"
+        )
         raise ValueError(
             f"Could not match {len(missing):,} bluepoint prediction rows within "
-            f"tolerance {tolerance}"
+            f"tolerance {tolerance}{offset_note}"
         )
-    if len(np.unique(row_indices)) != len(row_indices):
-        raise ValueError("Bluepoint predictions matched duplicate original LAS/LAZ rows")
     return row_indices
+
+
+def bluepoint_round_predictions(pred_dir: Path, sample_id: str) -> list[Path]:
+    """The predictions of bluepoint rounds 2..N, in round order."""
+    rounds = []
+    for candidate in pred_dir.glob(f"{sample_id}_*.ply"):
+        match = re.fullmatch(rf"{re.escape(sample_id)}_(\d+)\.ply", candidate.name)
+        if match and int(match.group(1)) > 1:
+            rounds.append((int(match.group(1)), candidate))
+    return [path for _, path in sorted(rounds)]
+
+
+def apply_bluepoint_round(
+    input_path: Path,
+    overlay_prediction: Path,
+    semantic_pred: np.ndarray,
+    instance_pred: np.ndarray,
+    score_pred: np.ndarray,
+    *,
+    chunk_size: int,
+    tolerance: float,
+    coordinate_offset: np.ndarray | None = None,
+) -> dict[str, object]:
+    """Write one later bluepoint round over the merged prediction, in place.
+
+    Each round numbers its trees from 1 again, so its tree ids are shifted
+    past the largest id already present; ids <= 0 stay unassigned.
+    """
+    overlay_points, overlay_semantic, overlay_instance, overlay_score = load_prediction_ply(
+        overlay_prediction
+    )
+    coordinate_offset_applied = False
+    try:
+        row_indices = locate_prediction_rows(
+            input_path,
+            overlay_points,
+            tolerance=tolerance,
+            chunk_size=chunk_size,
+        )
+    except ValueError as raw_match_error:
+        if coordinate_offset is None or np.allclose(coordinate_offset, 0.0):
+            raise
+        try:
+            row_indices = locate_prediction_rows(
+                input_path,
+                overlay_points,
+                tolerance=tolerance,
+                chunk_size=chunk_size,
+                coordinate_offset=coordinate_offset,
+            )
+        except ValueError as offset_match_error:
+            raise ValueError(
+                "Could not match bluepoint overlay rows either in raw "
+                f"coordinates ({raw_match_error}) or offset-restored "
+                f"coordinates ({offset_match_error})"
+            ) from offset_match_error
+        coordinate_offset_applied = True
+    if len(row_indices) != len(overlay_points):
+        raise ValueError(
+            f"Overlay prediction {overlay_prediction} row mapping returned "
+            f"{len(row_indices):,} rows for {len(overlay_points):,} points"
+        )
+    duplicate_row_count = int(len(row_indices) - len(np.unique(row_indices)))
+    if duplicate_row_count:
+        order = np.lexsort((-overlay_score, row_indices))
+        sorted_rows = row_indices[order]
+        keep_sorted = np.r_[True, sorted_rows[1:] != sorted_rows[:-1]]
+        keep = order[keep_sorted]
+        row_indices = row_indices[keep]
+        overlay_semantic = overlay_semantic[keep]
+        overlay_instance = overlay_instance[keep]
+        overlay_score = overlay_score[keep]
+    instance_id_offset = max(int(instance_pred.max(initial=0)), 0)
+    overlay_instance = overlay_instance.astype(np.int32, copy=True)
+    trees = overlay_instance > 0
+    overlay_instance[trees] += instance_id_offset
+    semantic_pred[row_indices] = overlay_semantic
+    instance_pred[row_indices] = overlay_instance
+    score_pred[row_indices] = overlay_score
+    summary: dict[str, object] = {
+        "prediction_ply": str(overlay_prediction),
+        "point_count": int(len(overlay_points)),
+        "applied_point_count": int(len(row_indices)),
+        "duplicate_row_count": duplicate_row_count,
+        "coordinate_offset_applied": coordinate_offset_applied,
+        "instance_id_offset": instance_id_offset,
+        "instance_count": int(len(np.unique(overlay_instance[trees]))),
+    }
+    if coordinate_offset_applied and coordinate_offset is not None:
+        summary["coordinate_offset"] = [float(value) for value in coordinate_offset]
+    return summary
 
 
 def overlay_bluepoint_prediction(
     input_path: Path,
     base_prediction: Path,
-    overlay_prediction: Path | None,
+    overlay_predictions: list[Path],
     output_path: Path,
     semantic_dim: str,
     instance_dim: str,
     score_dim: str,
     chunk_size: int,
     tolerance: float,
+    coordinate_offset: np.ndarray | None = None,
 ) -> dict[str, object]:
     base_points, semantic_pred, instance_pred, score_pred = load_prediction_ply(
         base_prediction
@@ -813,32 +966,23 @@ def overlay_bluepoint_prediction(
             "updated bluepoint writer so the first-pass PLY contains all points."
         )
 
-    overlay_summary: dict[str, object] | None = None
-    if overlay_prediction is not None:
-        overlay_points, overlay_semantic, overlay_instance, overlay_score = load_prediction_ply(
-            overlay_prediction
-        )
-        row_indices = locate_prediction_rows(
-            input_path,
-            overlay_points,
-            tolerance=tolerance,
-            chunk_size=chunk_size,
-        )
-        if len(row_indices) != len(overlay_points):
-            raise ValueError(
-                f"Overlay prediction {overlay_prediction} row mapping returned "
-                f"{len(row_indices):,} rows for {len(overlay_points):,} points"
+    semantic_pred = semantic_pred.copy()
+    instance_pred = instance_pred.copy()
+    score_pred = score_pred.copy()
+    overlay_summaries: list[dict[str, object]] = []
+    for overlay_prediction in overlay_predictions:
+        overlay_summaries.append(
+            apply_bluepoint_round(
+                input_path,
+                overlay_prediction,
+                semantic_pred,
+                instance_pred,
+                score_pred,
+                chunk_size=chunk_size,
+                tolerance=tolerance,
+                coordinate_offset=coordinate_offset,
             )
-        semantic_pred = semantic_pred.copy()
-        instance_pred = instance_pred.copy()
-        score_pred = score_pred.copy()
-        semantic_pred[row_indices] = overlay_semantic
-        instance_pred[row_indices] = overlay_instance
-        score_pred[row_indices] = overlay_score
-        overlay_summary = {
-            "prediction_ply": str(overlay_prediction),
-            "point_count": int(len(overlay_points)),
-        }
+        )
 
     write_enriched_laz_stream(
         input_path,
@@ -856,7 +1000,8 @@ def overlay_bluepoint_prediction(
     return {
         "input": str(input_path),
         "prediction_ply": str(base_prediction),
-        "overlay_prediction": overlay_summary,
+        "overlay_prediction": overlay_summaries[-1] if overlay_summaries else None,
+        "overlay_predictions": overlay_summaries,
         "output": str(output_path),
         "point_count": int(n_points),
         "positive_instance_count": int(len(positive_instances)),
@@ -1154,10 +1299,24 @@ def build_env(repo_dir: Path, gpu_device: str | None) -> dict[str, str]:
         else f"{repo_dir}{os.pathsep}{existing_pythonpath}"
     )
     env.setdefault("WANDB_MODE", "disabled")
-    env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-    env.setdefault("XDG_CACHE_HOME", "/tmp/.cache")
-    env.setdefault("HF_HOME", "/tmp/huggingface")
-    env.setdefault("TRANSFORMERS_CACHE", "/tmp/huggingface/transformers")
+    runtime_dirs = {
+        "HOME": "/tmp/forestmamba-home",
+        "MPLCONFIGDIR": "/tmp/matplotlib",
+        "XDG_CACHE_HOME": "/tmp/.cache",
+        "HF_HOME": "/tmp/huggingface",
+        "TRANSFORMERS_CACHE": "/tmp/huggingface/transformers",
+    }
+    for key, fallback in runtime_dirs.items():
+        path = Path(env.get(key) or fallback)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            path = Path(fallback)
+            path.mkdir(parents=True, exist_ok=True)
+        if not os.access(path, os.W_OK):
+            path = Path(fallback)
+            path.mkdir(parents=True, exist_ok=True)
+        env[key] = str(path)
     if gpu_device is not None and str(gpu_device).strip() != "":
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_device).strip()
     return env
@@ -1278,6 +1437,7 @@ def process_one_bluepoint(
     bluepoint_iterations: int,
     bluepoint_score_threshold: float | None,
     bluepoint_second_pass_threshold: float,
+    bluepoint_threshold_enabled: bool,
     spatial_match_tolerance: float,
     benchmark_stage_log: Path | None,
 ) -> dict[str, object]:
@@ -1314,8 +1474,7 @@ def process_one_bluepoint(
         score_threshold=bluepoint_score_threshold,
     )
 
-    second_pass_decision: dict[str, object] | None = None
-    overlay_prediction: Path | None = None
+    threshold_decisions: list[dict[str, object]] = []
 
     if prediction_dir is not None:
         pred_dir = prediction_dir
@@ -1367,31 +1526,33 @@ def process_one_bluepoint(
                 )
 
             bluepoint_path = pred_dir / f"{sample_id}_bluepoints_{iteration}.ply"
-            if iteration == 1 and bluepoint_iterations > 1:
-                first_pass_stats = first_pass_unassigned_ratio(pred_dir, sample_id)
-                should_run_second_pass = (
-                    first_pass_stats["unassigned_ratio"]
+            if bluepoint_threshold_enabled and iteration < bluepoint_iterations:
+                unresolved_stats = bluepoint_unresolved_ratio(
+                    pred_dir,
+                    sample_id,
+                    iteration,
+                    point_count,
+                )
+                should_run_next_pass = (
+                    unresolved_stats["unassigned_ratio"]
                     > bluepoint_second_pass_threshold
                 )
-                second_pass_decision = {
-                    **first_pass_stats,
+                threshold_decision = {
+                    **unresolved_stats,
                     "threshold": float(bluepoint_second_pass_threshold),
-                    "run_second_pass": bool(should_run_second_pass),
+                    "next_iteration": int(iteration + 1),
+                    "run_next_pass": bool(should_run_next_pass),
                 }
+                threshold_decisions.append(threshold_decision)
                 print(
-                    "[bluepoint] first-pass non-ground unassigned ratio "
-                    f"{first_pass_stats['unassigned_ratio']:.4%} "
+                    "[bluepoint] unresolved share after round "
+                    f"{iteration}: {unresolved_stats['unassigned_ratio']:.4%} "
                     f"(threshold {bluepoint_second_pass_threshold:.4%}); "
-                    f"run_second_pass={should_run_second_pass}",
+                    f"run_next_pass={should_run_next_pass}",
                     flush=True,
                 )
-                if not should_run_second_pass:
+                if not should_run_next_pass:
                     break
-
-            if iteration > 1:
-                candidate_overlay = pred_dir / f"{sample_id}_{iteration}.ply"
-                if candidate_overlay.exists():
-                    overlay_prediction = candidate_overlay
             if not bluepoint_path.exists():
                 print(
                     f"[bluepoint] No bluepoints for round {iteration}; stopping.",
@@ -1409,13 +1570,10 @@ def process_one_bluepoint(
     base_prediction = pred_dir / f"{sample_id}_1.ply"
     if not base_prediction.exists():
         raise FileNotFoundError(f"Bluepoint base prediction missing: {base_prediction}")
-    if prediction_dir is not None:
-        for candidate in sorted(pred_dir.glob(f"{sample_id}_*.ply")):
-            match = re.fullmatch(rf"{re.escape(sample_id)}_(\d+)\.ply", candidate.name)
-            if match and int(match.group(1)) > 1:
-                overlay_prediction = candidate
+    overlay_predictions = bluepoint_round_predictions(pred_dir, sample_id)
 
-    output_path = output_dir / f"{stem}_forestmamba_bluepoints.laz"
+    output_path = output_dir / f"{stem}_forestmamba.laz"
+    coordinate_offset = load_forainet_coordinate_offset(dataset_root, sample_id)
     with benchmark_stage(
         benchmark_stage_log,
         model="forestmamba-bluepoint",
@@ -1426,19 +1584,21 @@ def process_one_bluepoint(
         summary = overlay_bluepoint_prediction(
             input_path,
             base_prediction,
-            overlay_prediction,
+            overlay_predictions,
             output_path,
             semantic_dim,
             instance_dim,
             score_dim,
             chunk_size,
             spatial_match_tolerance,
+            coordinate_offset=coordinate_offset,
         )
     summary["prediction_mode"] = "bluepoints"
     summary["sample_id"] = sample_id
     summary["staged_point_count"] = int(point_count)
-    if second_pass_decision is not None:
-        summary["second_pass_decision"] = second_pass_decision
+    if threshold_decisions:
+        summary["bluepoint_threshold_decisions"] = threshold_decisions
+        summary["second_pass_decision"] = threshold_decisions[0]
     return summary
 
 
@@ -1630,7 +1790,8 @@ def process_one_tiled(
     }
 
 
-def run_batch(args: argparse.Namespace) -> None:
+def main() -> None:
+    args = parse_args()
     for name in (args.semantic_dim, args.instance_dim, args.score_dim):
         validate_dim_name(name)
 
@@ -1650,7 +1811,15 @@ def run_batch(args: argparse.Namespace) -> None:
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     if not config_base.exists():
         raise FileNotFoundError(f"Config base not found: {config_base}")
-    if args.bluepoint_iterations > 0 and args.tile_size > 0:
+    if args.bluepoint_max_additional_runs < 0:
+        raise ValueError("--bluepoint-max-additional-runs must be >= 0")
+    if args.bluepoint_iterations is None:
+        bluepoint_iterations = 1 + args.bluepoint_max_additional_runs
+    else:
+        bluepoint_iterations = args.bluepoint_iterations
+    bluepoint_threshold_enabled = True
+
+    if bluepoint_iterations > 0 and args.tile_size > 0:
         raise ValueError("Bluepoint inference is not supported with --tile-size yet")
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1678,7 +1847,7 @@ def run_batch(args: argparse.Namespace) -> None:
                 chunk_size=args.chunk_size,
             )
             model_input_path = crop_path
-        if args.bluepoint_iterations > 0:
+        if bluepoint_iterations > 0:
             summary = process_one_bluepoint(
                 model_input_path,
                 repo_dir=repo_dir,
@@ -1695,9 +1864,10 @@ def run_batch(args: argparse.Namespace) -> None:
                 instance_dim=args.instance_dim,
                 score_dim=args.score_dim,
                 chunk_size=args.chunk_size,
-                bluepoint_iterations=args.bluepoint_iterations,
+                bluepoint_iterations=bluepoint_iterations,
                 bluepoint_score_threshold=args.bluepoint_score_threshold,
                 bluepoint_second_pass_threshold=args.bluepoint_second_pass_threshold,
+                bluepoint_threshold_enabled=bluepoint_threshold_enabled,
                 spatial_match_tolerance=args.spatial_match_tolerance,
                 benchmark_stage_log=benchmark_stage_log,
             )
@@ -1754,10 +1924,6 @@ def run_batch(args: argparse.Namespace) -> None:
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps({"files": summaries}, indent=2) + "\n")
     print(f"[batch] Wrote {summary_path}", flush=True)
-
-
-def main(argv: list[str] | None = None) -> None:
-    run_batch(parse_args(argv))
 
 
 if __name__ == "__main__":
