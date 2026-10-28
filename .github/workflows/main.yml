@@ -62,9 +62,9 @@ jobs:
 
       - name: Download ForestMamba checkpoint
         run: |
-          python -m pip install --user --no-cache-dir gdown
+          python -m pip install --user --no-cache-dir gdown==5.2.0
           mkdir -p "$(dirname "${CHECKPOINT_PATH}")"
-          python -m gdown --id "${CHECKPOINT_FILE_ID}" -O "${CHECKPOINT_PATH}"
+          python -m gdown "${CHECKPOINT_FILE_ID}" -O "${CHECKPOINT_PATH}"
           echo "${CHECKPOINT_SHA256}  ${CHECKPOINT_PATH}" | sha256sum -c -
 
       - name: Build and push Docker image
