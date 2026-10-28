@@ -2,6 +2,7 @@
 import argparse
 import os
 import os.path as osp
+from functools import partial
 
 from mmengine.config import Config, ConfigDict, DictAction
 from mmengine.registry import RUNNERS
@@ -187,6 +188,9 @@ def main():
         # build customized runner from the registry
         # if 'runner_type' is set in the cfg
         runner = RUNNERS.build(cfg)
+
+    # Keep MMEngine initialization order, but reject partial model weights.
+    runner.load_checkpoint = partial(runner.load_checkpoint, strict=True)
 
     # start testing
     runner.test()
