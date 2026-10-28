@@ -25,7 +25,7 @@ from scipy.spatial import cKDTree
 
 DEFAULT_CHECKPOINT = (
     "/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/"
-    "epoch_3000_fix.pth"
+    "v6_epoch_1500_fix.pth"
 )
 DEFAULT_CONFIG_BASE = (
     "/workspace/configs/ForAINetv2/"

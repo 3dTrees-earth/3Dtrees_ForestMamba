@@ -18,7 +18,7 @@ DEFAULT_CHECKPOINT = (
     DEFAULT_REPO_DIR
     / "work_dirs"
     / "forestmamba_chm_radius16_qp300_2many_v6"
-    / "epoch_3000_fix.pth"
+    / "v6_epoch_1500_fix.pth"
 )
 
 
@@ -53,19 +53,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def normalized_checkpoint(path: str) -> str:
-    checkpoint = Path(path)
-    if checkpoint.exists():
-        return str(checkpoint)
-    if checkpoint.name == "v6_epoch_1500_fix.pth" and DEFAULT_CHECKPOINT.exists():
-        print(
-            f"[compat] Checkpoint {checkpoint} not found; using {DEFAULT_CHECKPOINT}",
-            flush=True,
-        )
-        return str(DEFAULT_CHECKPOINT)
-    return str(checkpoint)
-
-
 def main() -> int:
     args = parse_args()
     repo_dir = Path(args.repo_dir)
@@ -82,7 +69,7 @@ def main() -> int:
         "--repo-dir",
         str(repo_dir),
         "--checkpoint",
-        normalized_checkpoint(args.checkpoint),
+        args.checkpoint,
         "--config-base",
         args.config_base,
         "--preprocess-workers",
