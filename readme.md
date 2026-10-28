@@ -308,7 +308,9 @@ fraction of all first-pass points are non-ground with raw
 `instance_pred == -1`. With the default `0.01`, the second pass runs when more
 than 1% of all first-pass points satisfy that condition. The wrapper then
 applies the direct predictions to the original LAZ rows and writes an enriched
-LAZ with the ForestMamba dimensions.
+LAZ with the ForestMamba dimensions. Each later pass numbers its trees from 1
+again, so its tree ids are shifted past the ids of the earlier passes; every
+pass is kept. The output is `<input>_forestmamba.laz`, as in one-pass mode.
 
 The legacy shell path still exists for manual experiments:
 
