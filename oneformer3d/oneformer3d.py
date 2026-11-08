@@ -14,6 +14,7 @@ import numpy as np
 from tools.base_modules import Seq, MLP, FastBatchNorm1d
 from .panoptic_losses import offset_loss, discriminative_loss, FastFocalLoss
 from torch_cluster import fps, knn as cluster_knn
+from .remapping import remapping_knn
 import re
 import math
 import collections 
@@ -2035,10 +2036,17 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
     
     @staticmethod
-    def _cleanup_sliding_window_memory():
-        """Release per-window sparse coordinate caches before the next crop."""
+    def _cleanup_sliding_window_memory(full=True):
+        """Release per-window sparse coordinate caches before the next crop.
+
+        ``full=False`` skips ``gc.collect`` and ``empty_cache``, which cost
+        about 0.2 s per window; the caching allocator frees its cached blocks
+        by itself before it raises an out-of-memory error.
+        """
         if hasattr(ME, 'clear_global_coordinate_manager'):
             ME.clear_global_coordinate_manager()
+        if not full:
+            return
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
@@ -2755,7 +2763,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         last_results, last_originids = None, None
 
-        for region in tqdm(regions, desc=f"[{current_filename}] Processing regions"):
+        for window_idx, region in enumerate(
+                tqdm(regions, desc=f"[{current_filename}] Processing regions")):
             # (1) Grab points inside this cylinder (squared distance avoids sqrt).
             dx = original_points[:, 0] - region[0]
             dy = original_points[:, 1] - region[1]
@@ -2787,11 +2796,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
             tree_indices = torch.where(
                 bi_semantic_logits.argmax(dim=1) == wood_class)[0]
 
-            # (4) pc1 -> pc3 nearest neighbor on GPU via torch_cluster.knn.
+            # (4) pc1 -> pc3 nearest neighbor via the experimental remapping adapter.
             # cluster_knn(x, y, k) returns (row, col): col[i] is the index in x
             # nearest to y[row[i]].  With k=1 row = arange(N_pc1) so col is the
-            # direct NN index — no big intermediate matrix, stays on GPU.
-            _assign    = cluster_knn(pc3.float(), pc1.float(), k=1)
+            # direct NN index. The adapter uses CPU search with CUDA fallback.
+            _assign    = remapping_knn(pc3.float(), pc1.float(), k=1)
             nn_idx_pc1 = _assign[1]   # (N_pc1,) index into pc3
 
             if tree_indices.numel() > 1:
@@ -2809,8 +2818,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 # (6) Decoder pass + per-window instance prediction.
                 # query_feats already contains pooled/extra features (no index needed).
                 x = self._sliding_window_decoder_forward(x, query_feats, voxel_xyz)
+                # The window merge below reads only the instance and semantic
+                # results, so the panoptic pass is skipped.
                 results_list = self.predict_by_feat_test(
-                    x, inverse_mapping2, pc3, query_feats)
+                    x, inverse_mapping2, pc3, query_feats, with_panoptic=False)
 
                 masks_np  = results_list[0].pts_instance_mask[0]  # (K,N_pc3) bool np
                 scores_np = results_list[0].instance_scores       # (K,) np
@@ -2922,7 +2933,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 del score_per_hit, best_score, best_mid, improved
             except NameError:
                 pass
-            self._cleanup_sliding_window_memory()
+            self._cleanup_sliding_window_memory(
+                full=(window_idx + 1) % 16 == 0)
 
         # ----- Global post-processing -----
         # (A) Resolve per-point semantic label from accumulated votes.
@@ -3025,7 +3037,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 instance_labels=inst_res[1].cpu().numpy(),
                 instance_scores=inst_res[2].cpu().numpy())]
 
-    def predict_by_feat_test(self, out, superpoints, coordinates, queries):
+    def predict_by_feat_test(self, out, superpoints, coordinates, queries,
+                             with_panoptic=True):
         """Predict instance, semantic, and panoptic masks for a single scene.
 
         Args:
@@ -3034,6 +3047,9 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 `masks` of shape (n_queries, n_points),
                 `scores` of shape (n_queris, 1) or None.
             superpoints (Tensor): of shape (n_raw_points,).
+            with_panoptic (bool): False skips the panoptic pass, which repeats
+                the instance post-processing; the panoptic slots then hold
+                all-zero maps, so the panoptic metric is not meaningful.
 
         Returns:
             List[PointData]: of len 1 with `pts_semantic_mask`,
@@ -3058,8 +3074,12 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         inst_res = self.pred_inst_sem_test(pred_masks[:-self.test_cfg.num_sem_cls, :],
                                   pred_scores[:-self.test_cfg.num_sem_cls, :],
                                   superpoints, self.test_cfg.inst_score_thr, sem_res, coordinates, ground_z_max, queries)
-        pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
-                                superpoints, sem_res, coordinates, ground_z_max, queries)
+        if with_panoptic:
+            pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
+                                    superpoints, sem_res, coordinates, ground_z_max, queries)
+        else:
+            pan_res = (torch.zeros_like(sem_res), torch.zeros_like(sem_res),
+                       inst_res[3].new_zeros(0))
 
         pts_semantic_mask = [sem_res.cpu().numpy(), pan_res[0].cpu().numpy()]
         pts_instance_mask = [inst_res[0].cpu().bool().numpy(),

@@ -219,6 +219,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--bluepoint-min-tree-points",
+        type=int,
+        default=300,
+        help=(
+            "Trees found by bluepoint rounds 2..N with fewer points stay "
+            "unassigned; these are mostly fragments of trees the first round "
+            "already found. 0 keeps every tree."
+        ),
+    )
+    parser.add_argument(
         "--spatial-match-tolerance",
         type=float,
         default=0.01,
@@ -870,12 +880,14 @@ def apply_bluepoint_round(
     *,
     chunk_size: int,
     tolerance: float,
+    min_tree_points: int = 0,
     coordinate_offset: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Write one later bluepoint round over the merged prediction, in place.
 
     Each round numbers its trees from 1 again, so its tree ids are shifted
-    past the largest id already present; ids <= 0 stay unassigned.
+    past the largest id already present; ids <= 0 stay unassigned, and so
+    do trees with fewer than ``min_tree_points`` points.
     """
     overlay_points, overlay_semantic, overlay_instance, overlay_score = load_prediction_ply(
         overlay_prediction
@@ -924,6 +936,14 @@ def apply_bluepoint_round(
     instance_id_offset = max(int(instance_pred.max(initial=0)), 0)
     overlay_instance = overlay_instance.astype(np.int32, copy=True)
     trees = overlay_instance > 0
+    tree_ids, tree_sizes = np.unique(overlay_instance[trees], return_counts=True)
+    small_ids = tree_ids[tree_sizes < min_tree_points]
+    if len(small_ids):
+        small = np.isin(overlay_instance, small_ids)
+        overlay_instance[small] = 0
+        overlay_score = overlay_score.astype(np.float32, copy=True)
+        overlay_score[small] = 0.0
+        trees &= ~small
     overlay_instance[trees] += instance_id_offset
     semantic_pred[row_indices] = overlay_semantic
     instance_pred[row_indices] = overlay_instance
@@ -936,6 +956,8 @@ def apply_bluepoint_round(
         "coordinate_offset_applied": coordinate_offset_applied,
         "instance_id_offset": instance_id_offset,
         "instance_count": int(len(np.unique(overlay_instance[trees]))),
+        "dropped_small_instance_count": int(len(small_ids)),
+        "dropped_small_instance_point_count": int(tree_sizes[tree_sizes < min_tree_points].sum()),
     }
     if coordinate_offset_applied and coordinate_offset is not None:
         summary["coordinate_offset"] = [float(value) for value in coordinate_offset]
@@ -952,6 +974,7 @@ def overlay_bluepoint_prediction(
     score_dim: str,
     chunk_size: int,
     tolerance: float,
+    min_tree_points: int = 0,
     coordinate_offset: np.ndarray | None = None,
 ) -> dict[str, object]:
     base_points, semantic_pred, instance_pred, score_pred = load_prediction_ply(
@@ -980,6 +1003,7 @@ def overlay_bluepoint_prediction(
                 score_pred,
                 chunk_size=chunk_size,
                 tolerance=tolerance,
+                min_tree_points=min_tree_points,
                 coordinate_offset=coordinate_offset,
             )
         )
@@ -1438,6 +1462,7 @@ def process_one_bluepoint(
     bluepoint_score_threshold: float | None,
     bluepoint_second_pass_threshold: float,
     bluepoint_threshold_enabled: bool,
+    bluepoint_min_tree_points: int,
     spatial_match_tolerance: float,
     benchmark_stage_log: Path | None,
 ) -> dict[str, object]:
@@ -1591,6 +1616,7 @@ def process_one_bluepoint(
             score_dim,
             chunk_size,
             spatial_match_tolerance,
+            min_tree_points=bluepoint_min_tree_points,
             coordinate_offset=coordinate_offset,
         )
     summary["prediction_mode"] = "bluepoints"
@@ -1813,6 +1839,8 @@ def main() -> None:
         raise FileNotFoundError(f"Config base not found: {config_base}")
     if args.bluepoint_max_additional_runs < 0:
         raise ValueError("--bluepoint-max-additional-runs must be >= 0")
+    if args.bluepoint_min_tree_points < 0:
+        raise ValueError("--bluepoint-min-tree-points must be >= 0")
     if args.bluepoint_iterations is None:
         bluepoint_iterations = 1 + args.bluepoint_max_additional_runs
     else:
@@ -1868,6 +1896,7 @@ def main() -> None:
                 bluepoint_score_threshold=args.bluepoint_score_threshold,
                 bluepoint_second_pass_threshold=args.bluepoint_second_pass_threshold,
                 bluepoint_threshold_enabled=bluepoint_threshold_enabled,
+                bluepoint_min_tree_points=args.bluepoint_min_tree_points,
                 spatial_match_tolerance=args.spatial_match_tolerance,
                 benchmark_stage_log=benchmark_stage_log,
             )

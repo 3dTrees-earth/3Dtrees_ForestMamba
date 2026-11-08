@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--score-dim", default="PredScore_FM")
     parser.add_argument("--bluepoint-iterations", default=None)
     parser.add_argument("--bluepoint-second-pass-threshold", default="0.01")
+    parser.add_argument("--bluepoint-min-tree-points", default="300")
     parser.add_argument("--spatial-match-tolerance", default="0.01")
     return parser.parse_args()
 
@@ -84,6 +85,8 @@ def main() -> int:
         args.score_dim,
         "--bluepoint-second-pass-threshold",
         str(args.bluepoint_second_pass_threshold),
+        "--bluepoint-min-tree-points",
+        str(args.bluepoint_min_tree_points),
         "--spatial-match-tolerance",
         str(args.spatial_match_tolerance),
     ]
