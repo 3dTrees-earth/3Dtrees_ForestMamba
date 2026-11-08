@@ -41,7 +41,7 @@ def write_round(path, rows, instance):
 
 
 class BluepointOverlayTest(unittest.TestCase):
-    def run_rounds(self, rounds):
+    def run_rounds(self, rounds, min_tree_points=0):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
@@ -73,6 +73,7 @@ class BluepointOverlayTest(unittest.TestCase):
             bluepoint_score_threshold=None,
             bluepoint_second_pass_threshold=0.01,
             bluepoint_threshold_enabled=True,
+            bluepoint_min_tree_points=min_tree_points,
             spatial_match_tolerance=0.01,
             benchmark_stage_log=None,
         )
@@ -103,6 +104,15 @@ class BluepointOverlayTest(unittest.TestCase):
         rounds = [(list(range(6)), [1, -1, -1, -1, -1, -1])] + [([i], [1]) for i in range(1, 6)]
         _, _, ids = self.run_rounds(rounds)
         np.testing.assert_array_equal(ids, [1, 2, 3, 4, 5, 6])
+
+    def test_small_later_round_trees_stay_unassigned(self):
+        # Round 2 finds a 1-point fragment and a 2-point tree.
+        summary, _, ids = self.run_rounds([
+            (list(range(6)), [1, 1, 2, -1, -1, -1]),
+            ([3, 4, 5], [1, 2, 2]),
+        ], min_tree_points=2)
+        np.testing.assert_array_equal(ids, [1, 1, 2, 0, 4, 4])
+        self.assertEqual(summary["overlay_predictions"][0]["dropped_small_instance_count"], 1)
 
     def test_round_list_is_numeric(self):
         with tempfile.TemporaryDirectory() as directory:
