@@ -14,6 +14,7 @@ import numpy as np
 from tools.base_modules import Seq, MLP, FastBatchNorm1d
 from .panoptic_losses import offset_loss, discriminative_loss, FastFocalLoss
 from torch_cluster import fps, knn as cluster_knn
+from .remapping import remapping_knn
 import re
 import math
 import collections 
@@ -49,6 +50,160 @@ class UnionFind:
             else:
                 self.parent[root_v] = root_u
                 self.rank[root_u] += 1
+
+
+def _numpy_chunk(values, start, end, dtype=None):
+    chunk = values[start:end]
+    if torch.is_tensor(chunk):
+        chunk = chunk.detach().cpu().numpy()
+    else:
+        chunk = np.asarray(chunk)
+    if dtype is not None:
+        chunk = chunk.astype(dtype, copy=False)
+    return chunk
+
+
+def _take_rows(values, indices):
+    if values is None:
+        return None
+    if torch.is_tensor(values):
+        torch_indices = torch.as_tensor(
+            indices, dtype=torch.long, device=values.device)
+        return values[torch_indices]
+    return np.asarray(values)[indices]
+
+
+def _write_binary_ply_withscore(
+        points,
+        semantic_pred,
+        instance_pred,
+        scores,
+        filename,
+        semantic_gt=None,
+        instance_gt=None):
+    output_dir = os.path.dirname(filename)
+    os.makedirs(output_dir, exist_ok=True)
+
+    point_count = int(points.shape[0])
+    include_gt = semantic_gt is not None and instance_gt is not None
+    chunk_size = int(os.environ.get(
+        "FORESTMAMBA_PLY_WRITE_CHUNK_POINTS", "2000000"))
+
+    dtype = [
+        ("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+        ("semantic_pred", "<i4"), ("instance_pred", "<i4"),
+        ("score", "<f4"),
+    ]
+    if include_gt:
+        dtype += [("semantic_gt", "<i4"), ("instance_gt", "<i4")]
+    dtype = np.dtype(dtype)
+
+    properties = [
+        "property float x",
+        "property float y",
+        "property float z",
+        "property int semantic_pred",
+        "property int instance_pred",
+        "property float score",
+    ]
+    if include_gt:
+        properties += ["property int semantic_gt", "property int instance_gt"]
+    header = "\n".join([
+        "ply",
+        "format binary_little_endian 1.0",
+        f"element vertex {point_count}",
+        *properties,
+        "end_header",
+        "",
+    ]).encode("ascii")
+
+    tmp_filename = f"{filename}.tmp"
+    with open(tmp_filename, "wb") as handle:
+        handle.write(header)
+        for start in range(0, point_count, chunk_size):
+            end = min(start + chunk_size, point_count)
+            pts = _numpy_chunk(points, start, end, np.float32)
+            vertex = np.empty(end - start, dtype=dtype)
+            vertex["x"] = pts[:, 0]
+            vertex["y"] = pts[:, 1]
+            vertex["z"] = pts[:, 2]
+            vertex["semantic_pred"] = _numpy_chunk(
+                semantic_pred, start, end, np.int32)
+            vertex["instance_pred"] = _numpy_chunk(
+                instance_pred, start, end, np.int32)
+            vertex["score"] = _numpy_chunk(scores, start, end, np.float32)
+            if include_gt:
+                vertex["semantic_gt"] = _numpy_chunk(
+                    semantic_gt, start, end, np.int32)
+                vertex["instance_gt"] = _numpy_chunk(
+                    instance_gt, start, end, np.int32)
+            vertex.tofile(handle)
+    os.replace(tmp_filename, filename)
+
+
+def _write_binary_bluepoints_ply(
+        points,
+        semantic_pred,
+        filename,
+        semantic_gt=None,
+        instance_gt=None):
+    output_dir = os.path.dirname(filename)
+    os.makedirs(output_dir, exist_ok=True)
+
+    point_count = int(points.shape[0])
+    chunk_size = int(os.environ.get(
+        "FORESTMAMBA_PLY_WRITE_CHUNK_POINTS", "2000000"))
+    dtype = np.dtype([
+        ("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+        ("semantic_pred", "<i4"),
+        ("semantic_seg", "<i4"),
+        ("treeID", "<i4"),
+    ])
+    header = "\n".join([
+        "ply",
+        "format binary_little_endian 1.0",
+        f"element vertex {point_count}",
+        "property float x",
+        "property float y",
+        "property float z",
+        "property int semantic_pred",
+        "property int semantic_seg",
+        "property int treeID",
+        "end_header",
+        "",
+    ]).encode("ascii")
+
+    tmp_filename = f"{filename}.tmp"
+    with open(tmp_filename, "wb") as handle:
+        handle.write(header)
+        for start in range(0, point_count, chunk_size):
+            end = min(start + chunk_size, point_count)
+            pts = _numpy_chunk(points, start, end, np.float32)
+            sem_pred = _numpy_chunk(semantic_pred, start, end, np.int32)
+            vertex = np.empty(end - start, dtype=dtype)
+            vertex["x"] = pts[:, 0]
+            vertex["y"] = pts[:, 1]
+            vertex["z"] = pts[:, 2]
+            vertex["semantic_pred"] = sem_pred
+            if semantic_gt is not None:
+                vertex["semantic_seg"] = _numpy_chunk(
+                    semantic_gt, start, end, np.int32) + 1
+            else:
+                vertex["semantic_seg"] = sem_pred + 1
+            if instance_gt is not None:
+                vertex["treeID"] = _numpy_chunk(instance_gt, start, end, np.int32)
+            else:
+                vertex["treeID"] = np.ones(end - start, dtype=np.int32)
+            vertex.tofile(handle)
+    os.replace(tmp_filename, filename)
+
+
+def _forestmamba_output_mode():
+    mode = os.environ.get("FORESTMAMBA_OUTPUT_MODE", "prediction").strip().lower()
+    if mode in {"bluepoint", "bluepoints"}:
+        return "bluepoints"
+    return "prediction"
+
 
 class ScanNetOneFormer3DMixin:
     """Class contains common methods for ScanNet and ScanNet200."""
@@ -1664,23 +1819,9 @@ class ForAINetV2OneFormer3D(Base3DDetector):
 
     @staticmethod
     def save_ply_withscore(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
-        output_dir = os.path.dirname(filename)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
-                ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-        
-        if semantic_gt is not None and instance_gt is not None:
-            dtype += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i], semantic_gt[i], instance_gt[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-        else:
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-
-        el = PlyElement.describe(vertex, 'vertex')
-        PlyData([el], text=False).write(filename)
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, filename,
+            semantic_gt, instance_gt)
 
     @staticmethod
     def finalize_semantic_labels(all_pre_sem):
@@ -1895,10 +2036,17 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
     
     @staticmethod
-    def _cleanup_sliding_window_memory():
-        """Release per-window sparse coordinate caches before the next crop."""
+    def _cleanup_sliding_window_memory(full=True):
+        """Release per-window sparse coordinate caches before the next crop.
+
+        ``full=False`` skips ``gc.collect`` and ``empty_cache``, which cost
+        about 0.2 s per window; the caching allocator frees its cached blocks
+        by itself before it raises an out-of-memory error.
+        """
         if hasattr(ME, 'clear_global_coordinate_manager'):
             ME.clear_global_coordinate_manager()
+        if not full:
+            return
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
@@ -2615,7 +2763,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         last_results, last_originids = None, None
 
-        for region in tqdm(regions, desc=f"[{current_filename}] Processing regions"):
+        for window_idx, region in enumerate(
+                tqdm(regions, desc=f"[{current_filename}] Processing regions")):
             # (1) Grab points inside this cylinder (squared distance avoids sqrt).
             dx = original_points[:, 0] - region[0]
             dy = original_points[:, 1] - region[1]
@@ -2647,11 +2796,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
             tree_indices = torch.where(
                 bi_semantic_logits.argmax(dim=1) == wood_class)[0]
 
-            # (4) pc1 -> pc3 nearest neighbor on GPU via torch_cluster.knn.
+            # (4) pc1 -> pc3 nearest neighbor via the experimental remapping adapter.
             # cluster_knn(x, y, k) returns (row, col): col[i] is the index in x
             # nearest to y[row[i]].  With k=1 row = arange(N_pc1) so col is the
-            # direct NN index — no big intermediate matrix, stays on GPU.
-            _assign    = cluster_knn(pc3.float(), pc1.float(), k=1)
+            # direct NN index. The adapter uses CPU search with CUDA fallback.
+            _assign    = remapping_knn(pc3.float(), pc1.float(), k=1)
             nn_idx_pc1 = _assign[1]   # (N_pc1,) index into pc3
 
             if tree_indices.numel() > 1:
@@ -2669,8 +2818,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 # (6) Decoder pass + per-window instance prediction.
                 # query_feats already contains pooled/extra features (no index needed).
                 x = self._sliding_window_decoder_forward(x, query_feats, voxel_xyz)
+                # The window merge below reads only the instance and semantic
+                # results, so the panoptic pass is skipped.
                 results_list = self.predict_by_feat_test(
-                    x, inverse_mapping2, pc3, query_feats)
+                    x, inverse_mapping2, pc3, query_feats, with_panoptic=False)
 
                 masks_np  = results_list[0].pts_instance_mask[0]  # (K,N_pc3) bool np
                 scores_np = results_list[0].instance_scores       # (K,) np
@@ -2782,7 +2933,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 del score_per_hit, best_score, best_mid, improved
             except NameError:
                 pass
-            self._cleanup_sliding_window_memory()
+            self._cleanup_sliding_window_memory(
+                full=(window_idx + 1) % 16 == 0)
 
         # ----- Global post-processing -----
         # (A) Resolve per-point semantic label from accumulated votes.
@@ -2822,10 +2974,16 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         # (G) Persist combined results.
         region_path = os.path.join(output_path, f"{current_filename}.ply")
-        self.save_ply_withscore(
-            original_points.cpu().numpy(), final_semantic_labels,
-            clean_all_pre_ins, merged_instance_scores,
-            region_path, pts_semantic_gt, pts_instance_gt)
+        if _forestmamba_output_mode() == "bluepoints":
+            self.save_bluepoints(
+                original_points, final_semantic_labels,
+                clean_all_pre_ins, merged_instance_scores,
+                region_path, pts_semantic_gt, pts_instance_gt)
+        else:
+            self.save_ply_withscore(
+                original_points, final_semantic_labels,
+                clean_all_pre_ins, merged_instance_scores,
+                region_path, pts_semantic_gt, pts_instance_gt)
 
         # Attach the last window's PointData (used by downstream eval hooks).
         if last_results is not None and len(last_results) == len(batch_data_samples):
@@ -2879,7 +3037,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 instance_labels=inst_res[1].cpu().numpy(),
                 instance_scores=inst_res[2].cpu().numpy())]
 
-    def predict_by_feat_test(self, out, superpoints, coordinates, queries):
+    def predict_by_feat_test(self, out, superpoints, coordinates, queries,
+                             with_panoptic=True):
         """Predict instance, semantic, and panoptic masks for a single scene.
 
         Args:
@@ -2888,6 +3047,9 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 `masks` of shape (n_queries, n_points),
                 `scores` of shape (n_queris, 1) or None.
             superpoints (Tensor): of shape (n_raw_points,).
+            with_panoptic (bool): False skips the panoptic pass, which repeats
+                the instance post-processing; the panoptic slots then hold
+                all-zero maps, so the panoptic metric is not meaningful.
 
         Returns:
             List[PointData]: of len 1 with `pts_semantic_mask`,
@@ -2912,8 +3074,12 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         inst_res = self.pred_inst_sem_test(pred_masks[:-self.test_cfg.num_sem_cls, :],
                                   pred_scores[:-self.test_cfg.num_sem_cls, :],
                                   superpoints, self.test_cfg.inst_score_thr, sem_res, coordinates, ground_z_max, queries)
-        pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
-                                superpoints, sem_res, coordinates, ground_z_max, queries)
+        if with_panoptic:
+            pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
+                                    superpoints, sem_res, coordinates, ground_z_max, queries)
+        else:
+            pan_res = (torch.zeros_like(sem_res), torch.zeros_like(sem_res),
+                       inst_res[3].new_zeros(0))
 
         pts_semantic_mask = [sem_res.cpu().numpy(), pan_res[0].cpu().numpy()]
         pts_instance_mask = [inst_res[0].cpu().bool().numpy(),
@@ -3958,27 +4124,13 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
     @staticmethod
     def save_ply_withscore(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
-        output_dir = os.path.dirname(filename)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
-                ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-        
-        if semantic_gt is not None and instance_gt is not None:
-            dtype += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i], semantic_gt[i], instance_gt[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-        else:
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-
-        el = PlyElement.describe(vertex, 'vertex')
-        PlyData([el], text=False).write(filename)
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, filename,
+            semantic_gt, instance_gt)
 
     @staticmethod
     def save_bluepoints(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
+        from plyfile import PlyData
 
         output_dir = os.path.dirname(filename)
         os.makedirs(output_dir, exist_ok=True)
@@ -4013,46 +4165,26 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         # Filter points that meet the condition
         mask = (semantic_pred != 0) & (instance_pred == -1)
-        points_filtered = points[mask]
-        semantic_pred_filtered = semantic_pred[mask]  # 也保存 semantic_pred
-        semantic_gt_filtered = semantic_gt[mask] if semantic_gt is not None else None
-        instance_gt_filtered = instance_gt[mask] if instance_gt is not None else None
+        filtered_indices = np.flatnonzero(mask)
+        points_filtered = _take_rows(points, filtered_indices)
+        semantic_pred_filtered = _take_rows(semantic_pred, filtered_indices)
+        semantic_gt_filtered = _take_rows(semantic_gt, filtered_indices)
+        instance_gt_filtered = _take_rows(instance_gt, filtered_indices)
 
-        # Keep points that do not meet the condition
-        points_remain = points[~mask]
-        semantic_pred_remain = semantic_pred[~mask]
-        instance_pred_remain = instance_pred[~mask]
-        scores_remain = scores[~mask]
-        semantic_gt_remain = semantic_gt[~mask] if semantic_gt is not None else None
-        instance_gt_remain = instance_gt[~mask] if instance_gt is not None else None
-
-        # Save the unfiltered point cloud only if it contains points
-        if points_remain.shape[0] > 0:
-            dtype_remain = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                            ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-            if semantic_gt is not None and instance_gt is not None:
-                dtype_remain += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-                vertex_remain = np.array(
-                    [tuple(points_remain[i]) + (semantic_pred_remain[i], instance_pred_remain[i], scores_remain[i], semantic_gt_remain[i], instance_gt_remain[i])
-                    for i in range(points_remain.shape[0])], dtype=dtype_remain)
-            else:
-                vertex_remain = np.array(
-                    [tuple(points_remain[i]) + (semantic_pred_remain[i], instance_pred_remain[i], scores_remain[i])
-                    for i in range(points_remain.shape[0])], dtype=dtype_remain)
-
-            el_remain = PlyElement.describe(vertex_remain, 'vertex')
-            PlyData([el_remain], text=False).write(new_filename)
+        # Save the full direct prediction. The separate bluepoints file is used only
+        # to seed an optional second pass; the wrapper applies predictions directly.
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, new_filename,
+            semantic_gt, instance_gt)
 
         # Save the filtered point cloud (with semantic_pred)
-        if points_filtered.shape[0] > 0:
-            dtype_filtered = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                            ('semantic_pred', 'i4'), ('semantic_seg', 'i4'), ('treeID', 'i4')]  # 添加 semantic_pred
-            vertex_filtered = np.array(
-                [tuple(points_filtered[i]) + (semantic_pred_filtered[i], semantic_gt_filtered[i]+1, instance_gt_filtered[i])
-                for i in range(points_filtered.shape[0])], dtype=dtype_filtered)
-
-            el_filtered = PlyElement.describe(vertex_filtered, 'vertex')
-            PlyData([el_filtered], text=False).write(new_filename_filtered)
+        if len(filtered_indices) > 0:
+            _write_binary_bluepoints_ply(
+                points_filtered,
+                semantic_pred_filtered,
+                new_filename_filtered,
+                semantic_gt_filtered,
+                instance_gt_filtered)
 
 
     @staticmethod
@@ -6048,4 +6180,3 @@ class InstanceOnlyOneFormer3D(Base3DDetector):
                 instance_labels=labels,
                 instance_scores=scores)
         ]
-
