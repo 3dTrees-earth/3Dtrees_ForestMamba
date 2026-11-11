@@ -3055,8 +3055,17 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 data_sample.pred_pts_seg = last_results[i]
                 data_sample.pred_pts_seg['originids'] = last_originids
         else:
+            # No window reached the decoder (a tile with one or a few points,
+            # or without trees). The output is already written; give the
+            # evaluator an empty one-point result, since None fails its check.
             for data_sample in batch_data_samples:
-                data_sample.pred_pts_seg = None
+                data_sample.pred_pts_seg = PointData(
+                    pts_semantic_mask=[np.zeros(1, dtype=np.int64)] * 2,
+                    pts_instance_mask=[np.zeros((0, 1), dtype=bool),
+                                       np.zeros(1, dtype=np.int64)],
+                    instance_labels=np.zeros(0, dtype=np.int64),
+                    instance_scores=np.zeros(0, dtype=np.float32),
+                    originids=np.zeros(1, dtype=np.int64))
         return batch_data_samples
 
     def predict_by_feat(self, out, superpoints):
