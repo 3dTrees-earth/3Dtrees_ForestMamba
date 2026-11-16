@@ -64,9 +64,15 @@ def export_one_scan(scan_name,
 
     if not test_mode:
         mask = np.logical_not(np.in1d(semantic_labels, DONOTCARE_CLASS_IDS))
-        mesh_vertices = mesh_vertices[mask, :]
-        semantic_labels = semantic_labels[mask]
-        instance_labels = instance_labels[mask]
+        if mask.all():
+            # Nothing to drop: keep the labels and only make the C-ordered
+            # vertex copy that boolean indexing would have made.
+            mesh_vertices = np.ascontiguousarray(mesh_vertices)
+        else:
+            mesh_vertices = mesh_vertices[mask, :]
+            semantic_labels = semantic_labels[mask]
+            instance_labels = instance_labels[mask]
+        del mask
 
         num_instances = len(np.unique(instance_labels))
         print(f'Num of instances: {num_instances}')

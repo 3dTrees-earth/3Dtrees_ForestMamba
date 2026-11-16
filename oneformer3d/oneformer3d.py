@@ -1958,6 +1958,63 @@ class ForAINetV2OneFormer3D(Base3DDetector):
 
         return merged_instance_labels, masks_after_score_merge
     
+class _WindowIndex:
+    """A point tile kept on the CPU, bucketed into a square grid.
+
+    ``cylinder`` moves only the points near one window to the GPU and returns
+    the same indices and rows, in the same ascending order, as a distance test
+    over the whole tile on the GPU.
+    """
+
+    def __init__(self, points, cell_size):
+        xy = points[:, :2]
+        self.origin = xy.min(0).values
+        self.cell = float(cell_size)
+        cells = torch.floor((xy - self.origin) / self.cell).long()
+        self.ny = int(cells[:, 1].max()) + 1
+        key = cells[:, 0] * self.ny + cells[:, 1]
+        self.order = torch.argsort(key, stable=True)
+        self.sorted_points = points[self.order]
+        counts = torch.bincount(key, minlength=(int(cells[:, 0].max()) + 1) * self.ny)
+        self.starts = (torch.cumsum(counts, 0) - counts).tolist()
+        self.ends = torch.cumsum(counts, 0).tolist()
+        self.nx = len(counts) // self.ny
+
+    def cylinder(self, center, radius_sq, device):
+        r = radius_sq ** 0.5
+        cx, cy = center[0] - float(self.origin[0]), center[1] - float(self.origin[1])
+        x0, x1 = max(int((cx - r) // self.cell) - 1, 0), min(int((cx + r) // self.cell) + 1, self.nx - 1)
+        y0, y1 = max(int((cy - r) // self.cell) - 1, 0), min(int((cy + r) // self.cell) + 1, self.ny - 1)
+        spans = [(self.starts[ix * self.ny + y0], self.ends[ix * self.ny + y1])
+                 for ix in range(x0, x1 + 1)] if x0 <= x1 and y0 <= y1 else []
+        spans = [(a, b) for a, b in spans if b > a]
+        if not spans:
+            return None, None
+        idx = torch.cat([self.order[a:b] for a, b in spans]).to(device)
+        pts = torch.cat([self.sorted_points[a:b] for a, b in spans]).to(device)
+        idx, perm = torch.sort(idx)
+        pts = pts[perm]
+        dx = pts[:, 0] - center[0]
+        dy = pts[:, 1] - center[1]
+        inside = (dx * dx + dy * dy) <= radius_sq
+        return idx[inside], pts[inside]
+
+
+def _count_rows(masks, columns=None, chunk=32):
+    """True values per row of a (K, N) bool tensor, optionally only in ``columns``.
+
+    Equal to ``masks.sum(1)``, which first copies the whole tensor to int64
+    (8 bytes per entry, about 2 GB for 400 masks over 640,000 points).
+    """
+    counts = torch.empty(len(masks), dtype=torch.long, device=masks.device)
+    for start in range(0, len(masks), chunk):
+        rows = masks[start:start + chunk]
+        if columns is not None:
+            rows = rows & columns
+        counts[start:start + chunk] = rows.sum(1)
+    return counts
+
+
 @MODELS.register_module()
 class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
     r"""FOR-instance dataset.
@@ -2737,7 +2794,18 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         radius_sq      = self.radius ** 2
         wood_class     = 1
 
-        original_points = batch_inputs_dict['points'][0]
+        # Keep the whole tile on the CPU; only each window's points go to the
+        # GPU. A large tile would otherwise hold GBs of VRAM for the run.
+        device = batch_inputs_dict['points'][0].device
+        original_points = batch_inputs_dict['points'][0].cpu()
+        batch_inputs_dict['points'][0] = original_points
+        # The loader also puts placeholder label masks (int64 per point) on
+        # the GPU; this path and the evaluator read only eval_ann_info.
+        for sample in batch_data_samples:
+            if 'gt_pts_seg' in sample:
+                del sample.gt_pts_seg
+        torch.cuda.empty_cache()
+        window_index = _WindowIndex(original_points, self.radius)
         pts_semantic_gt = batch_data_samples[0].eval_ann_info['pts_semantic_mask']
         pts_instance_gt = batch_data_samples[0].eval_ann_info['pts_instance_mask']
         regions = self.generate_cylindrical_regions(
@@ -2750,6 +2818,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         global_instance_scores = np.zeros(N_total, dtype=float)
         best_masks             = []   # list of (pts_glob, inst_id, score)
         max_instance           = 0
+        # Mask records hold point indices for the whole run; int32 halves them.
+        index_dtype = np.int32 if N_total < 2**31 else np.int64
 
         # Auto-create output dir once per run.
         if self._output_path is None:
@@ -2766,12 +2836,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         for window_idx, region in enumerate(
                 tqdm(regions, desc=f"[{current_filename}] Processing regions")):
             # (1) Grab points inside this cylinder (squared distance avoids sqrt).
-            dx = original_points[:, 0] - region[0]
-            dy = original_points[:, 1] - region[1]
-            region_mask = (dx * dx + dy * dy) <= radius_sq
-            pc1_indices = torch.where(region_mask)[0]
-            pc1 = original_points[region_mask]
-            if len(pc1) == 0:
+            pc1_indices, pc1 = window_index.cylinder(region, radius_sq, device)
+            if pc1 is None or len(pc1) == 0:
                 continue
 
             # (2) Voxel-grid downsample, then cap point count by random sampling.
@@ -2886,7 +2952,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                             sel_pts = mk_bool[mid].nonzero(
                                 as_tuple=True)[0].cpu().numpy()
                             best_masks.append((
-                                pts_glob[sel_pts],
+                                pts_glob[sel_pts].astype(index_dtype),
                                 max_instance + int(mid),
                                 float(scores_kept_np[int(mid)])))
 
@@ -2918,7 +2984,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
             self._query_xyzs_cache = None
             try:
-                del dx, dy, region_mask, pc1_indices, pc1
+                del pc1_indices, pc1
                 del pc2, pc2_indices, pc3, pc3_indices
                 del coordinates, features, inverse_mapping2, spatial_shape
                 del x, embed_logits, bi_semantic_logits, tree_indices
@@ -2935,6 +3001,16 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 pass
             self._cleanup_sliding_window_memory(
                 full=(window_idx + 1) % 16 == 0)
+
+            # Drop mask records whose instance no longer owns any point, as
+            # step (D) below would. Instance ids are never reused and later
+            # windows only overwrite points, so a dropped record could never
+            # come back; without this the list grows with every window.
+            if (window_idx + 1) % 32 == 0:
+                best_masks = [
+                    (pts, iid, sc) for (pts, iid, sc) in best_masks
+                    if np.any(all_pre_ins[pts] == iid)
+                ]
 
         # ----- Global post-processing -----
         # (A) Resolve per-point semantic label from accumulated votes.
@@ -2991,8 +3067,17 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 data_sample.pred_pts_seg = last_results[i]
                 data_sample.pred_pts_seg['originids'] = last_originids
         else:
+            # No window reached the decoder (a tile with one or a few points,
+            # or without trees). The output is already written; give the
+            # evaluator an empty one-point result, since None fails its check.
             for data_sample in batch_data_samples:
-                data_sample.pred_pts_seg = None
+                data_sample.pred_pts_seg = PointData(
+                    pts_semantic_mask=[np.zeros(1, dtype=np.int64)] * 2,
+                    pts_instance_mask=[np.zeros((0, 1), dtype=bool),
+                                       np.zeros(1, dtype=np.int64)],
+                    instance_labels=np.zeros(0, dtype=np.int64),
+                    instance_scores=np.zeros(0, dtype=np.float32),
+                    originids=np.zeros(1, dtype=np.int64))
         return batch_data_samples
 
     def predict_by_feat(self, out, superpoints):
@@ -3304,11 +3389,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         stuff_cls_tensor = torch.tensor(self.test_cfg.stuff_cls, device=sem_res.device)
 
         # Compute the binary mask for stuff_cls
-        is_stuff = torch.isin(sem_res, stuff_cls_tensor).float()
-        # Multiply mask_pred by the binary mask and sum along the columns
-        mask_scores = (mask_pred * is_stuff).sum(dim=1)
-        # Calculate the number of points in each mask
-        num_points_in_mask = mask_pred.sum(dim=1)
+        is_stuff = torch.isin(sem_res, stuff_cls_tensor)
+        # Count each mask's stuff points and all its points
+        mask_scores = _count_rows(mask_pred, is_stuff)
+        num_points_in_mask = _count_rows(mask_pred)
         # Set scores to 0 where the majority of points are stuff_cls
         scores[mask_scores > (num_points_in_mask / 2)] = 0
 
@@ -3333,7 +3417,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         queries_select = queries_select[score_mask]
 
         # npoint_thr
-        mask_pointnum = mask_pred.sum(1)
+        mask_pointnum = _count_rows(mask_pred)
         npoint_mask = mask_pointnum > self.test_cfg.npoint_thr
         scores = scores[npoint_mask]
         labels = labels[npoint_mask]
@@ -4381,7 +4465,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         kept_masks = []
 
         for pts_idx, inst_id, score in best_masks:
-            pts_idx = np.asarray(pts_idx, dtype=int)   # 防止 list 进来
+            pts_idx = np.asarray(pts_idx)              # 防止 list 进来
             overlap = taken_flag[pts_idx].mean()       # == ratio
 
             if overlap > overlap_threshold:
