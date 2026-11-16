@@ -2800,10 +2800,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         original_points = batch_inputs_dict['points'][0].cpu()
         batch_inputs_dict['points'][0] = original_points
         # The loader also puts placeholder label masks (int64 per point) on
-        # the GPU; this path reads only eval_ann_info.
+        # the GPU; this path and the evaluator read only eval_ann_info.
         for sample in batch_data_samples:
             if 'gt_pts_seg' in sample:
-                sample.gt_pts_seg = sample.gt_pts_seg.cpu()
+                del sample.gt_pts_seg
         torch.cuda.empty_cache()
         window_index = _WindowIndex(original_points, self.radius)
         pts_semantic_gt = batch_data_samples[0].eval_ann_info['pts_semantic_mask']
@@ -2818,6 +2818,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         global_instance_scores = np.zeros(N_total, dtype=float)
         best_masks             = []   # list of (pts_glob, inst_id, score)
         max_instance           = 0
+        # Mask records hold point indices for the whole run; int32 halves them.
+        index_dtype = np.int32 if N_total < 2**31 else np.int64
 
         # Auto-create output dir once per run.
         if self._output_path is None:
@@ -2950,7 +2952,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                             sel_pts = mk_bool[mid].nonzero(
                                 as_tuple=True)[0].cpu().numpy()
                             best_masks.append((
-                                pts_glob[sel_pts],
+                                pts_glob[sel_pts].astype(index_dtype),
                                 max_instance + int(mid),
                                 float(scores_kept_np[int(mid)])))
 
@@ -2999,6 +3001,16 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 pass
             self._cleanup_sliding_window_memory(
                 full=(window_idx + 1) % 16 == 0)
+
+            # Drop mask records whose instance no longer owns any point, as
+            # step (D) below would. Instance ids are never reused and later
+            # windows only overwrite points, so a dropped record could never
+            # come back; without this the list grows with every window.
+            if (window_idx + 1) % 32 == 0:
+                best_masks = [
+                    (pts, iid, sc) for (pts, iid, sc) in best_masks
+                    if np.any(all_pre_ins[pts] == iid)
+                ]
 
         # ----- Global post-processing -----
         # (A) Resolve per-point semantic label from accumulated votes.
@@ -4453,7 +4465,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         kept_masks = []
 
         for pts_idx, inst_id, score in best_masks:
-            pts_idx = np.asarray(pts_idx, dtype=int)   # 防止 list 进来
+            pts_idx = np.asarray(pts_idx)              # 防止 list 进来
             overlap = taken_flag[pts_idx].mean()       # == ratio
 
             if overlap > overlap_threshold:
