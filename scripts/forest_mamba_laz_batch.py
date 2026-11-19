@@ -1343,7 +1343,42 @@ def build_env(repo_dir: Path, gpu_device: str | None) -> dict[str, str]:
         env[key] = str(path)
     if gpu_device is not None and str(gpu_device).strip() != "":
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_device).strip()
+    visible = env.get("CUDA_VISIBLE_DEVICES")
+    if visible:
+        indices = cuda_visible_devices_as_indices(visible)
+        if indices != visible:
+            print(f"[env] CUDA_VISIBLE_DEVICES {visible} -> {indices} (PCI_BUS_ID order)", flush=True)
+            env["CUDA_VISIBLE_DEVICES"] = indices
+            env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     return env
+
+
+def cuda_visible_devices_as_indices(visible: str) -> str:
+    """Translate GPU UUIDs in CUDA_VISIBLE_DEVICES to nvidia-smi indices.
+
+    Some Galaxy EU GPU nodes set CUDA_VISIBLE_DEVICES to a UUID such as
+    'GPU-8d92d525-...'. CUDA accepts that, but torch 1.13 and mmengine 0.7
+    only handle integer ids. nvidia-smi numbers GPUs in PCI bus order, so the
+    indices hold with CUDA_DEVICE_ORDER=PCI_BUS_ID. Values that are already
+    integers, or that nvidia-smi cannot resolve, are returned unchanged.
+    """
+    entries = [entry.strip() for entry in visible.split(",") if entry.strip()]
+    if all(entry.lstrip("-").isdigit() for entry in entries):
+        return visible
+    try:
+        listing = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+            capture_output=True, text=True, check=True, timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return visible
+    index_by_uuid = {}
+    for line in listing.splitlines():
+        index, _, uuid = line.partition(",")
+        index_by_uuid[uuid.strip()] = index.strip()
+    if not all(entry.isdigit() or entry in index_by_uuid for entry in entries):
+        return visible
+    return ",".join(entry if entry.isdigit() else index_by_uuid[entry] for entry in entries)
 
 
 def process_one(
