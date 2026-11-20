@@ -23,6 +23,11 @@ import sys, datetime
 # This is the full refactored version using ThreadPoolExecutor for parallel region inference
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import gc
+
+# Free GPU memory to keep outside PyTorch's cache between sliding windows,
+# for MinkowskiEngine and cuSPARSE buffers (see _cleanup_sliding_window_memory).
+SLIDING_WINDOW_MIN_FREE_BYTES = int(
+    float(os.environ.get('FM_MIN_FREE_GPU_GIB', '4')) * 2**30)
 from tqdm import tqdm
 from sklearn.neighbors import NearestNeighbors
 from plyfile import PlyData, PlyElement
@@ -2015,6 +2020,22 @@ def _count_rows(masks, columns=None, chunk=32):
     return counts
 
 
+def _normalized_mask_scores(mask_sigmoid, threshold, chunk=32):
+    """Mean sigmoid inside each thresholded mask, a block of rows at a time.
+
+    Equal to ``(s * (s > t)).sum(1) / ((s > t).sum(1) + 1e-6)``, without the
+    full float32 product and int64 copy of the (K, N) mask (2.2 GB at once
+    for a dense window; it ran a 16 GB Tesla T4 out of memory).
+    """
+    out = torch.empty(len(mask_sigmoid), dtype=mask_sigmoid.dtype,
+                      device=mask_sigmoid.device)
+    for start in range(0, len(mask_sigmoid), chunk):
+        rows = mask_sigmoid[start:start + chunk]
+        keep = rows > threshold
+        out[start:start + chunk] = (rows * keep).sum(1) / (keep.sum(1) + 1e-6)
+    return out
+
+
 @MODELS.register_module()
 class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
     r"""FOR-instance dataset.
@@ -2097,16 +2118,25 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         """Release per-window sparse coordinate caches before the next crop.
 
         ``full=False`` skips ``gc.collect`` and ``empty_cache``, which cost
-        about 0.2 s per window; the caching allocator frees its cached blocks
-        by itself before it raises an out-of-memory error.
+        about 0.2 s per window, unless the GPU is nearly full. MinkowskiEngine
+        and cuSPARSE allocate with cudaMalloc, outside PyTorch's caching
+        allocator, so blocks PyTorch keeps cached are not available to them:
+        on a 16 GB Tesla T4 that raised cudaErrorMemoryAllocation in
+        coo_spmm_average while PyTorch held several GB of free cache.
         """
         if hasattr(ME, 'clear_global_coordinate_manager'):
             ME.clear_global_coordinate_manager()
-        if not full:
+        if not torch.cuda.is_available():
+            if full:
+                gc.collect()
             return
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+        if not full:
+            free, _ = torch.cuda.mem_get_info()
+            if free >= SLIDING_WINDOW_MIN_FREE_BYTES:
+                return
+        torch.cuda.empty_cache()
+        if full:
+            gc.collect()
 
     def _sample_queries(self, backbone_feats, embed_feats_tree, xyz_voxels,
                         tree_indices, voxel_instance_labels, max_queries):
@@ -3369,10 +3399,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         queries_select = queries[topk_idx]
         if self.test_cfg.get('obj_normalization', None):
-            mask_pred_thr = mask_pred_sigmoid > \
-                self.test_cfg.obj_normalization_thr
-            mask_scores = (mask_pred_sigmoid * mask_pred_thr).sum(1) / \
-                (mask_pred_thr.sum(1) + 1e-6)
+            mask_scores = _normalized_mask_scores(
+                mask_pred_sigmoid, self.test_cfg.obj_normalization_thr)
             scores = scores * mask_scores
 
         if self.test_cfg.get('nms', None):
