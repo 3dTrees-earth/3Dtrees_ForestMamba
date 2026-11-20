@@ -1381,6 +1381,34 @@ def cuda_visible_devices_as_indices(visible: str) -> str:
     return ",".join(entry if entry.isdigit() else index_by_uuid[entry] for entry in entries)
 
 
+def report_gpu(env: dict[str, str], info_path: Path = Path("/workspace/cuda_archs.json")) -> None:
+    """Print one info line about the GPU and stop early if the image cannot run on it."""
+    supported = None
+    if info_path.exists():
+        supported = json.loads(info_path.read_text()).get("supported_compute")
+    visible = env.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip()
+    query = ["nvidia-smi", "--query-gpu=index,name,compute_cap,memory.total", "--format=csv,noheader"]
+    try:
+        rows = subprocess.run(query, capture_output=True, text=True, check=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        print("[gpu] nvidia-smi unavailable, GPU not checked", flush=True)
+        return
+    fields = [[part.strip() for part in row.split(",")] for row in rows.strip().splitlines()]
+    # With CUDA_DEVICE_ORDER=PCI_BUS_ID (set by build_env) indices match nvidia-smi.
+    gpu = next((f for f in fields if f[0] == visible), fields[0] if fields else None)
+    if gpu is None or len(gpu) < 4:
+        print("[gpu] no GPU listed by nvidia-smi", flush=True)
+        return
+    _, name, capability, memory = gpu
+    image = ", ".join(supported) if supported else "unknown"
+    print(f"[gpu] {name}, compute {capability}, {memory} | image runs on compute {image}", flush=True)
+    if supported and capability not in supported:
+        raise RuntimeError(
+            f"This ForestMamba image has no CUDA code for {name} (compute {capability}); "
+            f"it runs on compute {image}. Send the job to another GPU type."
+        )
+
+
 def process_one(
     input_path: Path,
     *,
@@ -1888,6 +1916,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
     inputs = collect_inputs(args)
+    if not args.skip_inference:
+        report_gpu(build_env(repo_dir, args.gpu_device))
 
     summaries = []
     for index, input_path in enumerate(inputs, start=1):
