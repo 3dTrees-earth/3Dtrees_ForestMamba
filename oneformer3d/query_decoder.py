@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from mmengine.model import BaseModule
 from mmdet3d.registry import MODELS
+from . import fm_kernels
 
 
 class CrossAttentionLayer(BaseModule):
@@ -837,7 +838,8 @@ class MambaAggregation(nn.Module):
         self.dropout = nn.Dropout(dropout)
         nn.init.xavier_uniform_(self.w_k)
 
-    def forward(self, query, src_feats, query_pos=None, src_pos=None):
+    def forward(self, query, src_feats, query_pos=None, src_pos=None,
+                knn_cache=None):
         """Forward pass.
 
         Args:
@@ -845,6 +847,9 @@ class MambaAggregation(nn.Module):
             src_feats (Tensor): (N, d) source (superpoint) features.
             query_pos (Tensor | None): (Q, 3) query 3-D positions.
             src_pos (Tensor | None): (N, 3) source 3-D positions.
+            knn_cache (dict | None): shared by the layers of one decoder pass.
+                Positions are the same in every layer, so the spatial k-NN is
+                computed once and reused (identical indices).
 
         Returns:
             Tensor: (Q, d) updated query features.
@@ -853,7 +858,22 @@ class MambaAggregation(nn.Module):
         k = min(self.k, src_feats.shape[0])
 
         # ── k-NN lookup ──────────────────────────────────────────────────
-        if query_pos is not None and src_pos is not None:
+        cached = None
+        if knn_cache is not None and query_pos is not None and src_pos is not None:
+            cached = knn_cache.get(k)
+            if cached is not None and not (
+                    cached[0] is src_pos and cached[1].shape == query_pos.shape
+                    and torch.equal(cached[1], query_pos)):
+                cached = None
+        if cached is not None:
+            idx = cached[2]
+            if fm_kernels.VERIFY:
+                fresh = torch.cdist(query_pos.float(), src_pos.float()).topk(
+                    k, dim=-1, largest=False)[1]
+                fm_kernels.verify_counts['decoder_knn_reuses'] += 1
+                fm_kernels.verify_counts['decoder_knn_mismatch'] += int(
+                    not torch.equal(fresh, idx))
+        elif query_pos is not None and src_pos is not None:
             dists = torch.cdist(query_pos.float(), src_pos.float())  # (Q, N)
         else:
             # Feature-space fallback: similarity via dot product
@@ -861,7 +881,10 @@ class MambaAggregation(nn.Module):
             s_n = F.normalize(self.w_v(src_feats), dim=-1)
             dists = -torch.mm(q_n, s_n.T)                           # (Q, N)
 
-        _, idx = dists.topk(k, dim=-1, largest=False)               # (Q, k)
+        if cached is None:
+            _, idx = dists.topk(k, dim=-1, largest=False)           # (Q, k)
+            if knn_cache is not None and query_pos is not None and src_pos is not None:
+                knn_cache[k] = (src_pos, query_pos, idx)
 
         # ── project + gather ─────────────────────────────────────────────
         q   = self.w_q(query)              # (Q, d)
@@ -998,6 +1021,10 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
         objectness_flag (bool): Predict per-query objectness score.
     """
 
+    # Layer outputs only feed the next layer (no attention masks), so with
+    # iter_pred off inference returns the same final masks and scores.
+    final_prediction_independent_of_iter_pred = True
+
     def __init__(self, num_layers, num_instance_queries, num_semantic_queries,
                  num_classes, in_channels, d_model,
                  iter_pred, attn_mask, objectness_flag,
@@ -1088,7 +1115,8 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
     # forward
     # ------------------------------------------------------------------
 
-    def _layer_forward(self, queries, inst_feats, query_xyzs, src_xyzs, layer_idx):
+    def _layer_forward(self, queries, inst_feats, query_xyzs, src_xyzs, layer_idx,
+                       knn_caches=None):
         """Run one decoder layer (Aggregation → SSM → FFN) over the batch."""
         agg = self.agg_layers[layer_idx]
         ssm = self.ssm_layers[layer_idx]
@@ -1117,7 +1145,8 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
         for i, (q, src) in enumerate(zip(queries, inst_feats)):
             q_pos = padded_xyzs[i] if padded_xyzs is not None else None
             s_pos = src_xyzs[i]    if src_xyzs   is not None else None
-            q = agg(q, src, query_pos=q_pos, src_pos=s_pos)
+            q = agg(q, src, query_pos=q_pos, src_pos=s_pos,
+                    knn_cache=None if knn_caches is None else knn_caches[i])
             new_queries.append(q)
 
         new_queries = ssm(new_queries, padded_xyzs)
@@ -1128,8 +1157,10 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
         inst_feats = [self.input_proj(y) for y in x]
         mask_feats = [self.x_mask(y) for y in x]
         queries    = self._get_queries(queries, len(x))
+        knn_caches = [{} for _ in queries]
         for i in range(len(self.agg_layers)):
-            queries = self._layer_forward(queries, inst_feats, query_xyzs, src_xyzs, i)
+            queries = self._layer_forward(queries, inst_feats, query_xyzs, src_xyzs, i,
+                                          knn_caches)
         pred_scores, pred_masks, _ = self._forward_head(queries, mask_feats)
         return dict(masks=pred_masks, scores=pred_scores)
 
@@ -1143,8 +1174,10 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
         pred_scores.append(pred_score)
         pred_masks.append(pred_mask)
 
+        knn_caches = [{} for _ in queries]
         for i in range(len(self.agg_layers)):
-            queries = self._layer_forward(queries, inst_feats, query_xyzs, src_xyzs, i)
+            queries = self._layer_forward(queries, inst_feats, query_xyzs, src_xyzs, i,
+                                          knn_caches)
             pred_score, pred_mask, _ = self._forward_head(queries, mask_feats)
             pred_scores.append(pred_score)
             pred_masks.append(pred_mask)

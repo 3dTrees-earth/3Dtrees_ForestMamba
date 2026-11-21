@@ -30,6 +30,13 @@ RUN pip uninstall -y MinkowskiEngine \
 ARG CHECKPOINT_PATH=/workspace/work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
 ARG CHECKPOINT_SHA256=a398d6e5e79af8ce9cf697fdd10b1887927dc838cdafcb5ae5c3352a2d56d96a
 COPY . /workspace
+# CUDA kernels for the exact sliding-window speed-ups (oneformer3d/fm_kernels.py),
+# for the same GPUs as MinkowskiEngine. Without them the original paths run.
+RUN cd /workspace/oneformer3d/csrc \
+    && TORCH_CUDA_ARCH_LIST="${MINKOWSKI_CUDA_ARCH_LIST}" \
+    pip install --no-deps --no-cache-dir --no-build-isolation . \
+    && rm -rf build *.egg-info \
+    && python -c "import torch, fm_kernels_cuda"
 # Ship exactly one checkpoint: the genuine v6 file, not a symlink to other weights.
 RUN test -f "${CHECKPOINT_PATH}" && test ! -L "${CHECKPOINT_PATH}" \
     && echo "${CHECKPOINT_SHA256}  ${CHECKPOINT_PATH}" | sha256sum -c - \
