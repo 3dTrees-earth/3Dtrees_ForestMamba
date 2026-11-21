@@ -14,6 +14,7 @@ import numpy as np
 from tools.base_modules import Seq, MLP, FastBatchNorm1d
 from .panoptic_losses import offset_loss, discriminative_loss, FastFocalLoss
 from torch_cluster import fps, knn as cluster_knn
+from .remapping import remapping_knn
 import re
 import math
 import collections 
@@ -22,6 +23,11 @@ import sys, datetime
 # This is the full refactored version using ThreadPoolExecutor for parallel region inference
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import gc
+
+# Free GPU memory to keep outside PyTorch's cache between sliding windows,
+# for MinkowskiEngine and cuSPARSE buffers (see _cleanup_sliding_window_memory).
+SLIDING_WINDOW_MIN_FREE_BYTES = int(
+    float(os.environ.get('FM_MIN_FREE_GPU_GIB', '4')) * 2**30)
 from tqdm import tqdm
 from sklearn.neighbors import NearestNeighbors
 from plyfile import PlyData, PlyElement
@@ -49,6 +55,160 @@ class UnionFind:
             else:
                 self.parent[root_v] = root_u
                 self.rank[root_u] += 1
+
+
+def _numpy_chunk(values, start, end, dtype=None):
+    chunk = values[start:end]
+    if torch.is_tensor(chunk):
+        chunk = chunk.detach().cpu().numpy()
+    else:
+        chunk = np.asarray(chunk)
+    if dtype is not None:
+        chunk = chunk.astype(dtype, copy=False)
+    return chunk
+
+
+def _take_rows(values, indices):
+    if values is None:
+        return None
+    if torch.is_tensor(values):
+        torch_indices = torch.as_tensor(
+            indices, dtype=torch.long, device=values.device)
+        return values[torch_indices]
+    return np.asarray(values)[indices]
+
+
+def _write_binary_ply_withscore(
+        points,
+        semantic_pred,
+        instance_pred,
+        scores,
+        filename,
+        semantic_gt=None,
+        instance_gt=None):
+    output_dir = os.path.dirname(filename)
+    os.makedirs(output_dir, exist_ok=True)
+
+    point_count = int(points.shape[0])
+    include_gt = semantic_gt is not None and instance_gt is not None
+    chunk_size = int(os.environ.get(
+        "FORESTMAMBA_PLY_WRITE_CHUNK_POINTS", "2000000"))
+
+    dtype = [
+        ("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+        ("semantic_pred", "<i4"), ("instance_pred", "<i4"),
+        ("score", "<f4"),
+    ]
+    if include_gt:
+        dtype += [("semantic_gt", "<i4"), ("instance_gt", "<i4")]
+    dtype = np.dtype(dtype)
+
+    properties = [
+        "property float x",
+        "property float y",
+        "property float z",
+        "property int semantic_pred",
+        "property int instance_pred",
+        "property float score",
+    ]
+    if include_gt:
+        properties += ["property int semantic_gt", "property int instance_gt"]
+    header = "\n".join([
+        "ply",
+        "format binary_little_endian 1.0",
+        f"element vertex {point_count}",
+        *properties,
+        "end_header",
+        "",
+    ]).encode("ascii")
+
+    tmp_filename = f"{filename}.tmp"
+    with open(tmp_filename, "wb") as handle:
+        handle.write(header)
+        for start in range(0, point_count, chunk_size):
+            end = min(start + chunk_size, point_count)
+            pts = _numpy_chunk(points, start, end, np.float32)
+            vertex = np.empty(end - start, dtype=dtype)
+            vertex["x"] = pts[:, 0]
+            vertex["y"] = pts[:, 1]
+            vertex["z"] = pts[:, 2]
+            vertex["semantic_pred"] = _numpy_chunk(
+                semantic_pred, start, end, np.int32)
+            vertex["instance_pred"] = _numpy_chunk(
+                instance_pred, start, end, np.int32)
+            vertex["score"] = _numpy_chunk(scores, start, end, np.float32)
+            if include_gt:
+                vertex["semantic_gt"] = _numpy_chunk(
+                    semantic_gt, start, end, np.int32)
+                vertex["instance_gt"] = _numpy_chunk(
+                    instance_gt, start, end, np.int32)
+            vertex.tofile(handle)
+    os.replace(tmp_filename, filename)
+
+
+def _write_binary_bluepoints_ply(
+        points,
+        semantic_pred,
+        filename,
+        semantic_gt=None,
+        instance_gt=None):
+    output_dir = os.path.dirname(filename)
+    os.makedirs(output_dir, exist_ok=True)
+
+    point_count = int(points.shape[0])
+    chunk_size = int(os.environ.get(
+        "FORESTMAMBA_PLY_WRITE_CHUNK_POINTS", "2000000"))
+    dtype = np.dtype([
+        ("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+        ("semantic_pred", "<i4"),
+        ("semantic_seg", "<i4"),
+        ("treeID", "<i4"),
+    ])
+    header = "\n".join([
+        "ply",
+        "format binary_little_endian 1.0",
+        f"element vertex {point_count}",
+        "property float x",
+        "property float y",
+        "property float z",
+        "property int semantic_pred",
+        "property int semantic_seg",
+        "property int treeID",
+        "end_header",
+        "",
+    ]).encode("ascii")
+
+    tmp_filename = f"{filename}.tmp"
+    with open(tmp_filename, "wb") as handle:
+        handle.write(header)
+        for start in range(0, point_count, chunk_size):
+            end = min(start + chunk_size, point_count)
+            pts = _numpy_chunk(points, start, end, np.float32)
+            sem_pred = _numpy_chunk(semantic_pred, start, end, np.int32)
+            vertex = np.empty(end - start, dtype=dtype)
+            vertex["x"] = pts[:, 0]
+            vertex["y"] = pts[:, 1]
+            vertex["z"] = pts[:, 2]
+            vertex["semantic_pred"] = sem_pred
+            if semantic_gt is not None:
+                vertex["semantic_seg"] = _numpy_chunk(
+                    semantic_gt, start, end, np.int32) + 1
+            else:
+                vertex["semantic_seg"] = sem_pred + 1
+            if instance_gt is not None:
+                vertex["treeID"] = _numpy_chunk(instance_gt, start, end, np.int32)
+            else:
+                vertex["treeID"] = np.ones(end - start, dtype=np.int32)
+            vertex.tofile(handle)
+    os.replace(tmp_filename, filename)
+
+
+def _forestmamba_output_mode():
+    mode = os.environ.get("FORESTMAMBA_OUTPUT_MODE", "prediction").strip().lower()
+    if mode in {"bluepoint", "bluepoints"}:
+        return "bluepoints"
+    return "prediction"
+
 
 class ScanNetOneFormer3DMixin:
     """Class contains common methods for ScanNet and ScanNet200."""
@@ -1664,23 +1824,9 @@ class ForAINetV2OneFormer3D(Base3DDetector):
 
     @staticmethod
     def save_ply_withscore(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
-        output_dir = os.path.dirname(filename)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
-                ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-        
-        if semantic_gt is not None and instance_gt is not None:
-            dtype += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i], semantic_gt[i], instance_gt[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-        else:
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-
-        el = PlyElement.describe(vertex, 'vertex')
-        PlyData([el], text=False).write(filename)
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, filename,
+            semantic_gt, instance_gt)
 
     @staticmethod
     def finalize_semantic_labels(all_pre_sem):
@@ -1817,6 +1963,79 @@ class ForAINetV2OneFormer3D(Base3DDetector):
 
         return merged_instance_labels, masks_after_score_merge
     
+class _WindowIndex:
+    """A point tile kept on the CPU, bucketed into a square grid.
+
+    ``cylinder`` moves only the points near one window to the GPU and returns
+    the same indices and rows, in the same ascending order, as a distance test
+    over the whole tile on the GPU.
+    """
+
+    def __init__(self, points, cell_size):
+        xy = points[:, :2]
+        self.origin = xy.min(0).values
+        self.cell = float(cell_size)
+        cells = torch.floor((xy - self.origin) / self.cell).long()
+        self.ny = int(cells[:, 1].max()) + 1
+        key = cells[:, 0] * self.ny + cells[:, 1]
+        self.order = torch.argsort(key, stable=True)
+        self.sorted_points = points[self.order]
+        counts = torch.bincount(key, minlength=(int(cells[:, 0].max()) + 1) * self.ny)
+        self.starts = (torch.cumsum(counts, 0) - counts).tolist()
+        self.ends = torch.cumsum(counts, 0).tolist()
+        self.nx = len(counts) // self.ny
+
+    def cylinder(self, center, radius_sq, device):
+        r = radius_sq ** 0.5
+        cx, cy = center[0] - float(self.origin[0]), center[1] - float(self.origin[1])
+        x0, x1 = max(int((cx - r) // self.cell) - 1, 0), min(int((cx + r) // self.cell) + 1, self.nx - 1)
+        y0, y1 = max(int((cy - r) // self.cell) - 1, 0), min(int((cy + r) // self.cell) + 1, self.ny - 1)
+        spans = [(self.starts[ix * self.ny + y0], self.ends[ix * self.ny + y1])
+                 for ix in range(x0, x1 + 1)] if x0 <= x1 and y0 <= y1 else []
+        spans = [(a, b) for a, b in spans if b > a]
+        if not spans:
+            return None, None
+        idx = torch.cat([self.order[a:b] for a, b in spans]).to(device)
+        pts = torch.cat([self.sorted_points[a:b] for a, b in spans]).to(device)
+        idx, perm = torch.sort(idx)
+        pts = pts[perm]
+        dx = pts[:, 0] - center[0]
+        dy = pts[:, 1] - center[1]
+        inside = (dx * dx + dy * dy) <= radius_sq
+        return idx[inside], pts[inside]
+
+
+def _count_rows(masks, columns=None, chunk=32):
+    """True values per row of a (K, N) bool tensor, optionally only in ``columns``.
+
+    Equal to ``masks.sum(1)``, which first copies the whole tensor to int64
+    (8 bytes per entry, about 2 GB for 400 masks over 640,000 points).
+    """
+    counts = torch.empty(len(masks), dtype=torch.long, device=masks.device)
+    for start in range(0, len(masks), chunk):
+        rows = masks[start:start + chunk]
+        if columns is not None:
+            rows = rows & columns
+        counts[start:start + chunk] = rows.sum(1)
+    return counts
+
+
+def _normalized_mask_scores(mask_sigmoid, threshold, chunk=32):
+    """Mean sigmoid inside each thresholded mask, a block of rows at a time.
+
+    Equal to ``(s * (s > t)).sum(1) / ((s > t).sum(1) + 1e-6)``, without the
+    full float32 product and int64 copy of the (K, N) mask (2.2 GB at once
+    for a dense window; it ran a 16 GB Tesla T4 out of memory).
+    """
+    out = torch.empty(len(mask_sigmoid), dtype=mask_sigmoid.dtype,
+                      device=mask_sigmoid.device)
+    for start in range(0, len(mask_sigmoid), chunk):
+        rows = mask_sigmoid[start:start + chunk]
+        keep = rows > threshold
+        out[start:start + chunk] = (rows * keep).sum(1) / (keep.sum(1) + 1e-6)
+    return out
+
+
 @MODELS.register_module()
 class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
     r"""FOR-instance dataset.
@@ -1895,13 +2114,29 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
     
     @staticmethod
-    def _cleanup_sliding_window_memory():
-        """Release per-window sparse coordinate caches before the next crop."""
+    def _cleanup_sliding_window_memory(full=True):
+        """Release per-window sparse coordinate caches before the next crop.
+
+        ``full=False`` skips ``gc.collect`` and ``empty_cache``, which cost
+        about 0.2 s per window, unless the GPU is nearly full. MinkowskiEngine
+        and cuSPARSE allocate with cudaMalloc, outside PyTorch's caching
+        allocator, so blocks PyTorch keeps cached are not available to them:
+        on a 16 GB Tesla T4 that raised cudaErrorMemoryAllocation in
+        coo_spmm_average while PyTorch held several GB of free cache.
+        """
         if hasattr(ME, 'clear_global_coordinate_manager'):
             ME.clear_global_coordinate_manager()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+        if not torch.cuda.is_available():
+            if full:
+                gc.collect()
+            return
+        if not full:
+            free, _ = torch.cuda.mem_get_info()
+            if free >= SLIDING_WINDOW_MIN_FREE_BYTES:
+                return
+        torch.cuda.empty_cache()
+        if full:
+            gc.collect()
 
     def _sample_queries(self, backbone_feats, embed_feats_tree, xyz_voxels,
                         tree_indices, voxel_instance_labels, max_queries):
@@ -2589,7 +2824,18 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         radius_sq      = self.radius ** 2
         wood_class     = 1
 
-        original_points = batch_inputs_dict['points'][0]
+        # Keep the whole tile on the CPU; only each window's points go to the
+        # GPU. A large tile would otherwise hold GBs of VRAM for the run.
+        device = batch_inputs_dict['points'][0].device
+        original_points = batch_inputs_dict['points'][0].cpu()
+        batch_inputs_dict['points'][0] = original_points
+        # The loader also puts placeholder label masks (int64 per point) on
+        # the GPU; this path and the evaluator read only eval_ann_info.
+        for sample in batch_data_samples:
+            if 'gt_pts_seg' in sample:
+                del sample.gt_pts_seg
+        torch.cuda.empty_cache()
+        window_index = _WindowIndex(original_points, self.radius)
         pts_semantic_gt = batch_data_samples[0].eval_ann_info['pts_semantic_mask']
         pts_instance_gt = batch_data_samples[0].eval_ann_info['pts_instance_mask']
         regions = self.generate_cylindrical_regions(
@@ -2602,6 +2848,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         global_instance_scores = np.zeros(N_total, dtype=float)
         best_masks             = []   # list of (pts_glob, inst_id, score)
         max_instance           = 0
+        # Mask records hold point indices for the whole run; int32 halves them.
+        index_dtype = np.int32 if N_total < 2**31 else np.int64
 
         # Auto-create output dir once per run.
         if self._output_path is None:
@@ -2615,14 +2863,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         last_results, last_originids = None, None
 
-        for region in tqdm(regions, desc=f"[{current_filename}] Processing regions"):
+        for window_idx, region in enumerate(
+                tqdm(regions, desc=f"[{current_filename}] Processing regions")):
             # (1) Grab points inside this cylinder (squared distance avoids sqrt).
-            dx = original_points[:, 0] - region[0]
-            dy = original_points[:, 1] - region[1]
-            region_mask = (dx * dx + dy * dy) <= radius_sq
-            pc1_indices = torch.where(region_mask)[0]
-            pc1 = original_points[region_mask]
-            if len(pc1) == 0:
+            pc1_indices, pc1 = window_index.cylinder(region, radius_sq, device)
+            if pc1 is None or len(pc1) == 0:
                 continue
 
             # (2) Voxel-grid downsample, then cap point count by random sampling.
@@ -2647,11 +2892,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
             tree_indices = torch.where(
                 bi_semantic_logits.argmax(dim=1) == wood_class)[0]
 
-            # (4) pc1 -> pc3 nearest neighbor on GPU via torch_cluster.knn.
+            # (4) pc1 -> pc3 nearest neighbor via the experimental remapping adapter.
             # cluster_knn(x, y, k) returns (row, col): col[i] is the index in x
             # nearest to y[row[i]].  With k=1 row = arange(N_pc1) so col is the
-            # direct NN index — no big intermediate matrix, stays on GPU.
-            _assign    = cluster_knn(pc3.float(), pc1.float(), k=1)
+            # direct NN index. The adapter uses CPU search with CUDA fallback.
+            _assign    = remapping_knn(pc3.float(), pc1.float(), k=1)
             nn_idx_pc1 = _assign[1]   # (N_pc1,) index into pc3
 
             if tree_indices.numel() > 1:
@@ -2669,8 +2914,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 # (6) Decoder pass + per-window instance prediction.
                 # query_feats already contains pooled/extra features (no index needed).
                 x = self._sliding_window_decoder_forward(x, query_feats, voxel_xyz)
+                # The window merge below reads only the instance and semantic
+                # results, so the panoptic pass is skipped.
                 results_list = self.predict_by_feat_test(
-                    x, inverse_mapping2, pc3, query_feats)
+                    x, inverse_mapping2, pc3, query_feats, with_panoptic=False)
 
                 masks_np  = results_list[0].pts_instance_mask[0]  # (K,N_pc3) bool np
                 scores_np = results_list[0].instance_scores       # (K,) np
@@ -2696,22 +2943,26 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                     masks_kept  = masks_t[keep]                   # (K',N_pc3)
                     scores_kept = scores_t[keep]                  # (K',)
 
-                    # (8) Project kept masks onto pc1 via the NN index: each pc1
-                    # point inherits the masks of its nearest pc3 voxel.
-                    mk_bool = masks_kept[:, nn_idx_pc1]           # (K',N_pc1)
-                    rows, cols = mk_bool.nonzero(as_tuple=True)
+                    # (8)+(9) Each pc1 point inherits the masks of its nearest
+                    # pc3 point, so its highest-scoring kept mask is that pc3
+                    # point's. Pick it per pc3 point (K' x N_pc3, capped by
+                    # num_points) and gather it for pc1. The former
+                    # (K', N_pc1) projection grew with point density without
+                    # bound and is not needed.
+                    rows, cols = masks_kept.nonzero(as_tuple=True)
                     score_per_hit = scores_kept[rows]             # (nnz,)
-
-                    # (9) For each pc1 point pick the highest-scoring kept mask.
-                    N1 = pc1.shape[0]
-                    best_score = torch.full((N1,), -1.0, device=device)
-                    best_mid   = torch.full(
-                        (N1,), -1, dtype=torch.long, device=device)
-                    best_score.index_reduce_(
+                    N3 = masks_kept.shape[1]
+                    best_score3 = torch.full((N3,), -1.0, device=device)
+                    best_mid3   = torch.full(
+                        (N3,), -1, dtype=torch.long, device=device)
+                    best_score3.index_reduce_(
                         0, cols, score_per_hit, reduce='amax')
-                    improved = score_per_hit == best_score[cols]
-                    best_mid.index_put_(
+                    improved = score_per_hit == best_score3[cols]
+                    best_mid3.index_put_(
                         (cols[improved],), rows[improved], accumulate=False)
+                    best_score = best_score3[nn_idx_pc1]          # (N_pc1,)
+                    best_mid   = best_mid3[nn_idx_pc1]
+                    del rows, cols, score_per_hit, improved
 
                     # (10) Merge into globals: only overwrite a point if this
                     # window's score beats whatever a previous (overlapping)
@@ -2730,12 +2981,11 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
                         # Record the FULL pc1 point list for each mid that
                         # contributed at least one "better" point.
-                        # Using mk_bool[mid] directly avoids re-scanning rows/cols.
                         for mid in np.unique(best_mid_np[better_pts]).tolist():
-                            sel_pts = mk_bool[mid].nonzero(
+                            sel_pts = masks_kept[mid][nn_idx_pc1].nonzero(
                                 as_tuple=True)[0].cpu().numpy()
                             best_masks.append((
-                                pts_glob[sel_pts],
+                                pts_glob[sel_pts].astype(index_dtype),
                                 max_instance + int(mid),
                                 float(scores_kept_np[int(mid)])))
 
@@ -2767,7 +3017,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
             self._query_xyzs_cache = None
             try:
-                del dx, dy, region_mask, pc1_indices, pc1
+                del pc1_indices, pc1
                 del pc2, pc2_indices, pc3, pc3_indices
                 del coordinates, features, inverse_mapping2, spatial_shape
                 del x, embed_logits, bi_semantic_logits, tree_indices
@@ -2778,11 +3028,22 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 del voxel_counts_inf, voxel_xyz, query_feats, results_list
                 del masks_np, scores_np, masks_t, scores_t
                 del pc3_dist_sq, edge_pts, touches_edge, keep
-                del masks_kept, scores_kept, mk_bool, rows, cols
-                del score_per_hit, best_score, best_mid, improved
+                del masks_kept, scores_kept, best_score3, best_mid3
+                del best_score, best_mid
             except NameError:
                 pass
-            self._cleanup_sliding_window_memory()
+            self._cleanup_sliding_window_memory(
+                full=(window_idx + 1) % 16 == 0)
+
+            # Drop mask records whose instance no longer owns any point, as
+            # step (D) below would. Instance ids are never reused and later
+            # windows only overwrite points, so a dropped record could never
+            # come back; without this the list grows with every window.
+            if (window_idx + 1) % 32 == 0:
+                best_masks = [
+                    (pts, iid, sc) for (pts, iid, sc) in best_masks
+                    if np.any(all_pre_ins[pts] == iid)
+                ]
 
         # ----- Global post-processing -----
         # (A) Resolve per-point semantic label from accumulated votes.
@@ -2822,10 +3083,16 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         # (G) Persist combined results.
         region_path = os.path.join(output_path, f"{current_filename}.ply")
-        self.save_ply_withscore(
-            original_points.cpu().numpy(), final_semantic_labels,
-            clean_all_pre_ins, merged_instance_scores,
-            region_path, pts_semantic_gt, pts_instance_gt)
+        if _forestmamba_output_mode() == "bluepoints":
+            self.save_bluepoints(
+                original_points, final_semantic_labels,
+                clean_all_pre_ins, merged_instance_scores,
+                region_path, pts_semantic_gt, pts_instance_gt)
+        else:
+            self.save_ply_withscore(
+                original_points, final_semantic_labels,
+                clean_all_pre_ins, merged_instance_scores,
+                region_path, pts_semantic_gt, pts_instance_gt)
 
         # Attach the last window's PointData (used by downstream eval hooks).
         if last_results is not None and len(last_results) == len(batch_data_samples):
@@ -2833,8 +3100,17 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 data_sample.pred_pts_seg = last_results[i]
                 data_sample.pred_pts_seg['originids'] = last_originids
         else:
+            # No window reached the decoder (a tile with one or a few points,
+            # or without trees). The output is already written; give the
+            # evaluator an empty one-point result, since None fails its check.
             for data_sample in batch_data_samples:
-                data_sample.pred_pts_seg = None
+                data_sample.pred_pts_seg = PointData(
+                    pts_semantic_mask=[np.zeros(1, dtype=np.int64)] * 2,
+                    pts_instance_mask=[np.zeros((0, 1), dtype=bool),
+                                       np.zeros(1, dtype=np.int64)],
+                    instance_labels=np.zeros(0, dtype=np.int64),
+                    instance_scores=np.zeros(0, dtype=np.float32),
+                    originids=np.zeros(1, dtype=np.int64))
         return batch_data_samples
 
     def predict_by_feat(self, out, superpoints):
@@ -2879,7 +3155,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 instance_labels=inst_res[1].cpu().numpy(),
                 instance_scores=inst_res[2].cpu().numpy())]
 
-    def predict_by_feat_test(self, out, superpoints, coordinates, queries):
+    def predict_by_feat_test(self, out, superpoints, coordinates, queries,
+                             with_panoptic=True):
         """Predict instance, semantic, and panoptic masks for a single scene.
 
         Args:
@@ -2888,6 +3165,9 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 `masks` of shape (n_queries, n_points),
                 `scores` of shape (n_queris, 1) or None.
             superpoints (Tensor): of shape (n_raw_points,).
+            with_panoptic (bool): False skips the panoptic pass, which repeats
+                the instance post-processing; the panoptic slots then hold
+                all-zero maps, so the panoptic metric is not meaningful.
 
         Returns:
             List[PointData]: of len 1 with `pts_semantic_mask`,
@@ -2912,8 +3192,12 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         inst_res = self.pred_inst_sem_test(pred_masks[:-self.test_cfg.num_sem_cls, :],
                                   pred_scores[:-self.test_cfg.num_sem_cls, :],
                                   superpoints, self.test_cfg.inst_score_thr, sem_res, coordinates, ground_z_max, queries)
-        pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
-                                superpoints, sem_res, coordinates, ground_z_max, queries)
+        if with_panoptic:
+            pan_res = self.pred_pan_sem(pred_masks, pred_scores, #pred_labels,
+                                    superpoints, sem_res, coordinates, ground_z_max, queries)
+        else:
+            pan_res = (torch.zeros_like(sem_res), torch.zeros_like(sem_res),
+                       inst_res[3].new_zeros(0))
 
         pts_semantic_mask = [sem_res.cpu().numpy(), pan_res[0].cpu().numpy()]
         pts_instance_mask = [inst_res[0].cpu().bool().numpy(),
@@ -3118,10 +3402,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         queries_select = queries[topk_idx]
         if self.test_cfg.get('obj_normalization', None):
-            mask_pred_thr = mask_pred_sigmoid > \
-                self.test_cfg.obj_normalization_thr
-            mask_scores = (mask_pred_sigmoid * mask_pred_thr).sum(1) / \
-                (mask_pred_thr.sum(1) + 1e-6)
+            mask_scores = _normalized_mask_scores(
+                mask_pred_sigmoid, self.test_cfg.obj_normalization_thr)
             scores = scores * mask_scores
 
         if self.test_cfg.get('nms', None):
@@ -3138,11 +3420,10 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         stuff_cls_tensor = torch.tensor(self.test_cfg.stuff_cls, device=sem_res.device)
 
         # Compute the binary mask for stuff_cls
-        is_stuff = torch.isin(sem_res, stuff_cls_tensor).float()
-        # Multiply mask_pred by the binary mask and sum along the columns
-        mask_scores = (mask_pred * is_stuff).sum(dim=1)
-        # Calculate the number of points in each mask
-        num_points_in_mask = mask_pred.sum(dim=1)
+        is_stuff = torch.isin(sem_res, stuff_cls_tensor)
+        # Count each mask's stuff points and all its points
+        mask_scores = _count_rows(mask_pred, is_stuff)
+        num_points_in_mask = _count_rows(mask_pred)
         # Set scores to 0 where the majority of points are stuff_cls
         scores[mask_scores > (num_points_in_mask / 2)] = 0
 
@@ -3167,7 +3448,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         queries_select = queries_select[score_mask]
 
         # npoint_thr
-        mask_pointnum = mask_pred.sum(1)
+        mask_pointnum = _count_rows(mask_pred)
         npoint_mask = mask_pointnum > self.test_cfg.npoint_thr
         scores = scores[npoint_mask]
         labels = labels[npoint_mask]
@@ -3958,27 +4239,13 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
     @staticmethod
     def save_ply_withscore(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
-        output_dir = os.path.dirname(filename)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
-                ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-        
-        if semantic_gt is not None and instance_gt is not None:
-            dtype += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i], semantic_gt[i], instance_gt[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-        else:
-            vertex = np.array([tuple(points[i]) + (semantic_pred[i], instance_pred[i], scores[i]) for i in range(points.shape[0])],
-                            dtype=dtype)
-
-        el = PlyElement.describe(vertex, 'vertex')
-        PlyData([el], text=False).write(filename)
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, filename,
+            semantic_gt, instance_gt)
 
     @staticmethod
     def save_bluepoints(points, semantic_pred, instance_pred, scores, filename, semantic_gt=None, instance_gt=None):
-        from plyfile import PlyData, PlyElement
+        from plyfile import PlyData
 
         output_dir = os.path.dirname(filename)
         os.makedirs(output_dir, exist_ok=True)
@@ -4013,46 +4280,26 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
 
         # Filter points that meet the condition
         mask = (semantic_pred != 0) & (instance_pred == -1)
-        points_filtered = points[mask]
-        semantic_pred_filtered = semantic_pred[mask]  # 也保存 semantic_pred
-        semantic_gt_filtered = semantic_gt[mask] if semantic_gt is not None else None
-        instance_gt_filtered = instance_gt[mask] if instance_gt is not None else None
+        filtered_indices = np.flatnonzero(mask)
+        points_filtered = _take_rows(points, filtered_indices)
+        semantic_pred_filtered = _take_rows(semantic_pred, filtered_indices)
+        semantic_gt_filtered = _take_rows(semantic_gt, filtered_indices)
+        instance_gt_filtered = _take_rows(instance_gt, filtered_indices)
 
-        # Keep points that do not meet the condition
-        points_remain = points[~mask]
-        semantic_pred_remain = semantic_pred[~mask]
-        instance_pred_remain = instance_pred[~mask]
-        scores_remain = scores[~mask]
-        semantic_gt_remain = semantic_gt[~mask] if semantic_gt is not None else None
-        instance_gt_remain = instance_gt[~mask] if instance_gt is not None else None
-
-        # Save the unfiltered point cloud only if it contains points
-        if points_remain.shape[0] > 0:
-            dtype_remain = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                            ('semantic_pred', 'i4'), ('instance_pred', 'i4'), ('score', 'f4')]
-            if semantic_gt is not None and instance_gt is not None:
-                dtype_remain += [('semantic_gt', 'i4'), ('instance_gt', 'i4')]
-                vertex_remain = np.array(
-                    [tuple(points_remain[i]) + (semantic_pred_remain[i], instance_pred_remain[i], scores_remain[i], semantic_gt_remain[i], instance_gt_remain[i])
-                    for i in range(points_remain.shape[0])], dtype=dtype_remain)
-            else:
-                vertex_remain = np.array(
-                    [tuple(points_remain[i]) + (semantic_pred_remain[i], instance_pred_remain[i], scores_remain[i])
-                    for i in range(points_remain.shape[0])], dtype=dtype_remain)
-
-            el_remain = PlyElement.describe(vertex_remain, 'vertex')
-            PlyData([el_remain], text=False).write(new_filename)
+        # Save the full direct prediction. The separate bluepoints file is used only
+        # to seed an optional second pass; the wrapper applies predictions directly.
+        _write_binary_ply_withscore(
+            points, semantic_pred, instance_pred, scores, new_filename,
+            semantic_gt, instance_gt)
 
         # Save the filtered point cloud (with semantic_pred)
-        if points_filtered.shape[0] > 0:
-            dtype_filtered = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                            ('semantic_pred', 'i4'), ('semantic_seg', 'i4'), ('treeID', 'i4')]  # 添加 semantic_pred
-            vertex_filtered = np.array(
-                [tuple(points_filtered[i]) + (semantic_pred_filtered[i], semantic_gt_filtered[i]+1, instance_gt_filtered[i])
-                for i in range(points_filtered.shape[0])], dtype=dtype_filtered)
-
-            el_filtered = PlyElement.describe(vertex_filtered, 'vertex')
-            PlyData([el_filtered], text=False).write(new_filename_filtered)
+        if len(filtered_indices) > 0:
+            _write_binary_bluepoints_ply(
+                points_filtered,
+                semantic_pred_filtered,
+                new_filename_filtered,
+                semantic_gt_filtered,
+                instance_gt_filtered)
 
 
     @staticmethod
@@ -4249,7 +4496,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         kept_masks = []
 
         for pts_idx, inst_id, score in best_masks:
-            pts_idx = np.asarray(pts_idx, dtype=int)   # 防止 list 进来
+            pts_idx = np.asarray(pts_idx)              # 防止 list 进来
             overlap = taken_flag[pts_idx].mean()       # == ratio
 
             if overlap > overlap_threshold:
@@ -6048,4 +6295,3 @@ class InstanceOnlyOneFormer3D(Base3DDetector):
                 instance_labels=labels,
                 instance_scores=scores)
         ]
-

@@ -1,0 +1,15 @@
+.git
+__pycache__/
+*.pyc
+
+data/*
+!data/ForAINetV2/
+!data/ForAINetV2/**
+
+downloads/
+work_dirs/*
+!work_dirs/forestmamba_chm_radius16_qp300_2many_v6/
+!work_dirs/forestmamba_chm_radius16_qp300_2many_v6/v6_epoch_1500_fix.pth
+
+**/.pytest_cache/
+**/.mypy_cache/

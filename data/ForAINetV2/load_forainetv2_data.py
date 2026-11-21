@@ -53,10 +53,14 @@ def read_segmentation(filename):
     return seg_to_verts, num_verts
 
 
-def extract_bbox(mesh_vertices, label_ids, instance_ids, bg_sem=np.array([0])):
+def extract_bbox(mesh_vertices, label_ids, instance_ids, bg_sem=np.array([0]),
+                 dtype=None):
     # Filter out background points
     valid_mask = ~np.isin(label_ids, bg_sem)
     mesh_vertices = mesh_vertices[valid_mask]
+    if dtype is not None:
+        # Convert only the kept points, not the whole cloud.
+        mesh_vertices = mesh_vertices.astype(dtype)
     instance_ids = instance_ids[valid_mask]
     label_ids = label_ids[valid_mask]
 
@@ -119,48 +123,45 @@ def export(ply_file,
     pcd = read_ply(ply_file)
     #points = np.vstack((pcd['x'], pcd['y'], pcd['z'])).astype(np.float32).T
 
-    points = np.vstack((pcd['x'], pcd['y'], pcd['z'])).astype(np.float64).T
-
     is_blue = 'bluepoints' in os.path.basename(ply_file)
 
     if is_blue:
-        offsets = np.zeros(3, dtype=np.float64)
         print("-------------------has blue point-----------------------")
     else:
         print("-------------------no blue point-----------------------")
-        mean_x = np.mean(points[:, 0])
-        mean_y = np.mean(points[:, 1])
-        min_z = np.min(points[:, 2])
-        offsets = np.array([mean_x, mean_y, min_z], dtype=np.float64)
 
-        points[:, 0] -= mean_x
-        points[:, 1] -= mean_y
-        points[:, 2] -= min_z
-
-    points = points.astype(np.float32)
-
-    #semantic_seg = np.ones((points.shape[0],), dtype=np.int64)
-    #treeID = np.zeros((points.shape[0],), dtype=np.int64)
-    semantic_seg = pcd["semantic_seg"].astype(np.int64)
-    treeID = pcd["treeID"].astype(np.int64)
-    #semantic_seg = pcd["semantic"].astype(np.int64)
-    #treeID = pcd["instance"].astype(np.int64)
+    # One float64 column at a time, into a (3, N) float32 array that is
+    # transposed at the end: the same values and memory layout as stacking
+    # all three columns in float64 first, at a quarter of the peak memory.
+    stacked = np.empty((3, len(pcd)), dtype=np.float32)
+    offsets = np.zeros(3, dtype=np.float64)
+    for axis, name in enumerate(('x', 'y', 'z')):
+        column = np.array(pcd[name], dtype=np.float64)
+        if not is_blue:
+            offsets[axis] = np.mean(column) if axis < 2 else np.min(column)
+            column -= offsets[axis]
+        stacked[axis] = column
+        del column
+    points = stacked.T
 
     # test set data doesn't have align_matrix
     axis_align_matrix = np.eye(4)
     axis_align_matrix = np.array(axis_align_matrix).reshape((4, 4))
 
-    # perform global alignment of mesh vertices
-    pts = np.ones((points.shape[0], 4))
-    pts[:, 0:3] = points[:, 0:3]
-    pts = np.dot(pts, axis_align_matrix.transpose())  # Nx4
-    aligned_mesh_vertices = pts[:, 0:3]
-
     # Load semantic and instance labels
     if not test_mode:
+        #semantic_seg = np.ones((points.shape[0],), dtype=np.int64)
+        #treeID = np.zeros((points.shape[0],), dtype=np.int64)
+        semantic_seg = pcd["semantic_seg"].astype(np.int64)
+        treeID = pcd["treeID"].astype(np.int64)
+        #semantic_seg = pcd["semantic"].astype(np.int64)
+        #treeID = pcd["instance"].astype(np.int64)
+        del pcd
+
         # semantic label
         bg_sem=np.array([0])   #####wythan wood np.array([1])
         label_ids = semantic_seg - 1
+        del semantic_seg
         instance_ids = treeID  # 0: unannotated
 
         # Set instance_ids of background points to -1
@@ -196,9 +197,13 @@ def export(ply_file,
 
         # Assign the result back to instance_ids
         instance_ids = new_instance_ids
+        del treeID, valid_mask
 
         unaligned_bboxes = extract_bbox(points, label_ids, instance_ids, bg_sem)
-        aligned_bboxes = extract_bbox(aligned_mesh_vertices, label_ids, instance_ids, bg_sem)
+        # The alignment matrix is the identity, so the aligned vertices are
+        # the points in float64; this skips the N x 4 homogeneous product.
+        aligned_bboxes = extract_bbox(points, label_ids, instance_ids, bg_sem,
+                                      dtype=np.float64)
     else:
         label_ids = None
         instance_ids = None

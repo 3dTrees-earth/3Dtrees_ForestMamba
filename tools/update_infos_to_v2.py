@@ -9,7 +9,6 @@ Example:
 """
 
 import argparse
-import time
 from os import path as osp
 from pathlib import Path
 
@@ -190,7 +189,6 @@ def update_scannet_infos(pkl_path, out_dir):
     if out_dir in pkl_path:
         print(f'Warning, you may overwriting '
               f'the original data {pkl_path}.')
-        time.sleep(5)
     METAINFO = {
         'classes':
         ('cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window',
@@ -269,7 +267,6 @@ def update_scannet200_infos(pkl_path, out_dir):
     if out_dir in pkl_path:
         print(f'Warning, you may overwriting '
               f'the original data {pkl_path}.')
-        time.sleep(5)
     METAINFO = {
         'classes':
         ('chair', 'table', 'door', 'couch', 'cabinet', 'shelf', 'desk',
@@ -385,7 +382,6 @@ def update_forainetv2_infos(pkl_path, out_dir):
     if out_dir in pkl_path:
         print(f'Warning, you may overwriting '
               f'the original data {pkl_path}.')
-        time.sleep(5)
     METAINFO = {
         'classes':
         ('tree')
