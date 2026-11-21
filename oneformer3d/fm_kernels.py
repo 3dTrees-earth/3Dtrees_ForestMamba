@@ -51,9 +51,12 @@ def fps(src, batch, ratio):
     Draws the random start exactly like torch_cluster (one ``torch.rand`` on the
     source device), so seeded runs pick the same points.
     """
-    if not (available() and src.is_cuda and src.dtype == torch.float32):
-        return cluster_fps(src, batch, ratio=ratio)
     n = src.size(0)
+    # The kernel handles one cloud; its tie keys hold indices below 2**31, and
+    # above 2**24 points float32 start draws can round to n.
+    if not (available() and src.is_cuda and src.dtype == torch.float32
+            and 0 < n <= 2 ** 24 and (batch is None or not bool(batch.any()))):
+        return cluster_fps(src, batch, ratio=ratio)
     r = torch.tensor(float(ratio), dtype=src.dtype, device=src.device)
     deg = torch.tensor([n], dtype=torch.long, device=src.device)
     k = int((deg.to(r.dtype) * r).ceil().long().item())
@@ -79,13 +82,16 @@ def nearest_sampled_point(refs, queries, cell, chunk=131072):
     over those voxels, as ``hybrid_nearest`` does over all refs. Returns None when
     the precondition does not hold; the caller then uses ``remapping_knn``.
     """
-    if not available() or not refs.is_cuda or len(refs) == 0:
+    if not (available() and refs.is_cuda and queries.device == refs.device
+            and len(refs) and len(queries) and cell > 0):
         return None
     dev = refs.device
     qc = torch.floor(queries / cell).to(torch.int32).long()
     lo = qc.min(0).values - 3
     span = qc.max(0).values - lo + 4
-    sy, sz = int(span[1]), int(span[2])
+    sx, sy, sz = (int(v) for v in span)
+    if sx * sy * sz >= 2 ** 62:  # the voxel key would overflow int64
+        return None
 
     def key(c):
         c = c - lo
@@ -102,6 +108,15 @@ def nearest_sampled_point(refs, queries, cell, chunk=131072):
 
     offs27, offs125 = offsets(1), offsets(2)
     refs64 = refs.double()
+    # How far any ref lies outside its own voxel. Voxel means are float32 sums,
+    # which drift for many points far from the origin; the search bounds below
+    # subtract this so a drifted ref is never missed.
+    vz = skey % sz
+    vy = torch.div(skey, sz, rounding_mode="floor") % sy
+    vx = torch.div(skey, sz * sy, rounding_mode="floor")
+    box_lo = (torch.stack([vx, vy, vz], 1) + lo).double() * cell
+    outside = torch.maximum(box_lo - refs64, refs64 - (box_lo + cell)).clamp(min=0)
+    slack = float(outside.norm(dim=1).max()) + 1e-4
 
     def search(q, qcell, offs, want_candidates=False):
         k = key(qcell.unsqueeze(1) + offs.unsqueeze(0))
@@ -123,11 +138,16 @@ def nearest_sampled_point(refs, queries, cell, chunk=131072):
         # to its nearest voxel face) away, minus slack for the float32 voxel mean.
         u = q.double() - qcell.double() * cell
         margin = torch.minimum(u, cell - u).min(1).values.clamp(min=0)
-        bound_sq = (cell + margin - 1e-4) ** 2
+        bound_sq = (cell + margin - slack).clamp(min=0) ** 2
         redo = torch.nonzero((first >= bound_sq) | (second >= bound_sq)).squeeze(1)
         if redo.numel():
             i2, f2, s2 = search(q[redo], qcell[redo], offs125)
             idx[redo], first[redo], second[redo] = i2, f2, s2
+            # Over 125 voxels the nearest ref, and any ref tied with it, must
+            # provably lie inside; otherwise use the full search.
+            bound125_sq = (2 * cell + margin[redo] - slack).clamp(min=0) ** 2
+            if bool((f2 >= bound125_sq * (1 - _RELATIVE_GUARD) - _ABSOLUTE_GUARD).any()):
+                return None
         if not bool(torch.isfinite(first).all()):
             return None
         out[s:s + chunk] = idx
@@ -141,7 +161,10 @@ def nearest_sampled_point(refs, queries, cell, chunk=131072):
     if ambiguous:
         rows = torch.cat(ambiguous)
         candidates = search(queries[rows], qc[rows], offs125, want_candidates=True)
-        out[rows] = _ext.fm_knn1(refs.float(), queries[rows].float(), candidates)
+        picked = _ext.fm_knn1(refs.float(), queries[rows].float(), candidates)
+        if bool((picked < 0).any()):
+            return None
+        out[rows] = picked
     return out
 
 

@@ -2889,6 +2889,7 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
         legacy_index = _WindowIndex(original_points, self.radius) if _VERIFY else None
         verify = _verify_counts
         verify.clear()
+        skipped_windows = 0
         # Points each instance id currently owns. A record's id can own points
         # only inside its own point list, so "owns any point" is a lookup.
         owned = np.zeros(1024, dtype=np.int64)
@@ -2951,13 +2952,14 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 features, coordinates, spatial_shape, len(batch_data_samples))
             try:
                 x = self.extract_feat(x)
-            except ValueError as err:
+            except (ValueError, RuntimeError) as err:
                 # A window of a few spread-out voxels can lose all of them in a
-                # stride-2 layer; spconv then raises "points vanished" and the
-                # whole job failed. Such a window holds no tree: skip it.
+                # stride-2 layer; spconv then raises "points vanished" (a
+                # ValueError, or a RuntimeError with its native algorithm) and
+                # the whole job failed. Such a window holds no tree: skip it.
                 if 'vanished' not in str(err):
                     raise
-                verify['skipped_degenerate_windows'] += 1
+                skipped_windows += 1
                 self._cleanup_sliding_window_memory(full=False)
                 continue
             embed_logits       = self.Embed(x[0])
@@ -2977,6 +2979,8 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 nn_idx_pc1 = fm_kernels.nearest_sampled_point(
                     pc3.float(), pc1.float(), grid_size)
             if nn_idx_pc1 is None:
+                if _VERIFY and len(pc2) <= num_points:
+                    verify['remap_fallback_windows'] += 1
                 nn_idx_pc1 = remapping_knn(pc3.float(), pc1.float(), k=1)[1]
             elif _VERIFY:
                 ref = remapping_knn(pc3.float(), pc1.float(), k=1)[1]
@@ -2999,20 +3003,27 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 # query_feats already contains pooled/extra features (no index needed).
                 # Only the last layer's prediction is used here; iter_pred would
                 # compute the (queries x voxels) mask head after every layer.
+                # Only for decoders whose layers do not read those masks: the
+                # transformer decoders use them as attention masks.
                 features_in = x
                 iter_pred = getattr(self.decoder, 'iter_pred', False)
-                self.decoder.iter_pred = False
+                skip_iter_pred = iter_pred and getattr(
+                    self.decoder, 'final_prediction_independent_of_iter_pred', False)
+                if skip_iter_pred:
+                    self.decoder.iter_pred = False
                 try:
                     x = self._sliding_window_decoder_forward(x, query_feats, voxel_xyz)
                 finally:
                     self.decoder.iter_pred = iter_pred
-                if _VERIFY and iter_pred:
+                if _VERIFY and skip_iter_pred:
                     ref = self._sliding_window_decoder_forward(
                         features_in, query_feats, voxel_xyz)
                     verify['decoder_windows'] += 1
+                    same_scores = (ref['scores'][0] is None and x['scores'][0] is None) or (
+                        ref['scores'][0] is not None and x['scores'][0] is not None
+                        and torch.equal(ref['scores'][0], x['scores'][0]))
                     verify['decoder_mismatch'] += int(not (
-                        torch.equal(ref['masks'][0], x['masks'][0])
-                        and torch.equal(ref['scores'][0], x['scores'][0])))
+                        torch.equal(ref['masks'][0], x['masks'][0]) and same_scores))
                     del ref
                 del features_in
                 # The window merge below reads only the instance and semantic
@@ -3216,6 +3227,9 @@ class ForAINetV2OneFormer3D_XAwarequery(Base3DDetector):
                 clean_all_pre_ins, merged_instance_scores,
                 region_path, pts_semantic_gt, pts_instance_gt)
 
+        if skipped_windows:
+            print(f"[forestmamba] skipped {skipped_windows} window(s) whose voxels "
+                  "vanished in the backbone", flush=True)
         if verify:
             print(f"[fm-verify] {dict(sorted(verify.items()))}", flush=True)
         if last_results is not None:

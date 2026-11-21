@@ -119,6 +119,20 @@ class CpuEquivalence(unittest.TestCase):
                             f"case {case}")
 
 
+class DecoderIterPredGate(unittest.TestCase):
+    def test_only_the_ssm_decoder_skips_iter_pred(self):
+        """Inference turns iter_pred off only where layers ignore the per-layer
+        masks; the transformer decoders use them as attention masks."""
+        from oneformer3d import query_decoder as qd
+        self.assertTrue(qd.ForAINetv2SSMQueryDecoder_XAwarequery
+                        .final_prediction_independent_of_iter_pred)
+        for name in ("QueryDecoder", "ForAINetv2QueryDecoder",
+                     "ForAINetv2QueryDecoder_XAwarequery", "ScanNetQueryDecoder",
+                     "OneDataQueryDecoder"):
+            self.assertFalse(getattr(getattr(qd, name),
+                                     "final_prediction_independent_of_iter_pred", False), name)
+
+
 # ---------------------------------------------------------------- GPU tests
 @unittest.skipUnless(CUDA, "needs CUDA and the fm_kernels_cuda extension")
 class GpuEquivalence(unittest.TestCase):
@@ -156,6 +170,64 @@ class GpuEquivalence(unittest.TestCase):
             self.assertIsNotNone(new)
             ref = remapping_knn(pc3.float(), pts.float(), k=1)[1]
             self.assertTrue(torch.equal(ref, new), f"seed {seed}")
+
+    def test_fps_multi_cloud_batch_falls_back(self):
+        x = torch.randn(3000, 3, device="cuda")
+        batch = torch.repeat_interleave(torch.arange(3, device="cuda"), 1000)
+        torch.manual_seed(0)
+        ref = cluster_fps(x, batch, ratio=0.1)
+        torch.manual_seed(0)
+        self.assertTrue(torch.equal(ref, fm_kernels.fps(x, batch, 0.1)))
+
+    def test_nearest_sampled_point_hard_inputs(self):
+        """Far from the origin, dense voxels, huge spans, tiny cells, no queries:
+        the result is either None (caller falls back) or exactly the reference."""
+        grid_sample = model.ForAINetV2OneFormer3D_XAwarequery.grid_sample
+        g = torch.Generator().manual_seed(7)
+        cases = []
+        for offset, n in ((32.0, 200_000), (100.0, 100_000), (500.0, 50_000), (5000.0, 5_000)):
+            pts = torch.rand(n, 3, generator=g) * 0.6 + offset  # ~27 voxels, thousands of points each
+            cases.append((pts, 0.2))
+        spread = torch.rand(101, 3, generator=g) * 450_000.0  # voxel key would overflow
+        cases.append((spread, 0.2))
+        cases.append((torch.rand(7, 3, generator=g) * 1e-4, 1e-5))
+        for i, (pts, cell) in enumerate(cases):
+            pts = pts.cuda()
+            pc3, _ = grid_sample(pts, torch.arange(len(pts), device="cuda"), cell)
+            new = fm_kernels.nearest_sampled_point(pc3.float(), pts.float(), cell)
+            if new is not None:
+                ref = remapping_knn(pc3.float(), pts.float(), k=1)[1]
+                self.assertTrue(torch.equal(ref, new), f"case {i}")
+        # Found in review: many identical points just below a voxel edge make
+        # the float32 voxel mean drift 0.1 m into the neighbouring voxel.
+        for offset, k in ((32.0, 200_000), (100.0, 100_000), (1000.0, 10_000)):
+            edge = float(np.nextafter(np.float32(offset - 0.2), np.float32(-np.inf)))
+            pts = torch.cat([
+                torch.tensor([[offset + 0.005, 0, 0], [offset + 0.195, 0.195, 0.195],
+                              [offset + 0.201, 0, 0]]),
+                torch.tensor([[edge, 0.0, 0.0]]).repeat(k, 1)]).float().cuda()
+            pc3, _ = grid_sample(pts, torch.arange(len(pts), device="cuda"), 0.2)
+            new = fm_kernels.nearest_sampled_point(pc3.float(), pts.float(), 0.2)
+            if new is not None:
+                ref = remapping_knn(pc3.float(), pts.float(), k=1)[1]
+                self.assertTrue(torch.equal(ref, new), f"drift at {offset} m")
+        refs = torch.rand(10, 3, device="cuda")
+        self.assertIsNone(fm_kernels.nearest_sampled_point(refs, refs[:0], 0.2))
+
+    @unittest.skipUnless(torch.cuda.device_count() > 1, "needs two GPUs")
+    def test_kernels_on_second_gpu(self):
+        torch.cuda.set_device(0)
+        x = torch.randn(5000, 3, device="cuda:1")
+        batch = torch.zeros(5000, dtype=torch.long, device="cuda:1")
+        torch.manual_seed(3)
+        ref = cluster_fps(x, batch, ratio=0.05)
+        torch.manual_seed(3)
+        self.assertTrue(torch.equal(ref, fm_kernels.fps(x, batch, 0.05)))
+        pts = (torch.round(torch.rand(20_000, 3, device="cuda:1") * 8000) / 1000)
+        grid_sample = model.ForAINetV2OneFormer3D_XAwarequery.grid_sample
+        pc3, _ = grid_sample(pts, torch.arange(len(pts), device="cuda:1"), 0.2)
+        new = fm_kernels.nearest_sampled_point(pc3.float(), pts.float(), 0.2)
+        self.assertTrue(torch.equal(remapping_knn(pc3.float(), pts.float(), k=1)[1], new))
 
     def test_decoder_knn_cache(self):
         torch.manual_seed(0)

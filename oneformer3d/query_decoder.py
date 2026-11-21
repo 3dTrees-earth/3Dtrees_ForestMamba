@@ -1021,6 +1021,10 @@ class ForAINetv2SSMQueryDecoder_XAwarequery(BaseModule):
         objectness_flag (bool): Predict per-query objectness score.
     """
 
+    # Layer outputs only feed the next layer (no attention masks), so with
+    # iter_pred off inference returns the same final masks and scores.
+    final_prediction_independent_of_iter_pred = True
+
     def __init__(self, num_layers, num_instance_queries, num_semantic_queries,
                  num_classes, in_channels, d_model,
                  iter_pred, attn_mask, objectness_flag,

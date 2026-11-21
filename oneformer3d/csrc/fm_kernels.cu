@@ -14,6 +14,7 @@
 
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace {
 
@@ -101,6 +102,8 @@ torch::Tensor fm_fps(torch::Tensor src, int64_t start, int64_t k) {
   TORCH_CHECK(src.is_cuda() && src.scalar_type() == torch::kFloat && src.dim() == 2,
               "fm_fps expects a CUDA float32 (N, D) tensor");
   TORCH_CHECK(k >= 1 && start >= 0 && start < src.size(0), "fm_fps: bad k or start");
+  TORCH_CHECK(src.size(0) < (1LL << 31), "fm_fps: at most 2^31 - 1 points");
+  const c10::cuda::CUDAGuard guard(src.device());
   src = src.contiguous();
   const long long N = src.size(0), dim = src.size(1);
   auto dist = torch::full({N}, 5e4, src.options());
@@ -121,6 +124,11 @@ torch::Tensor fm_fps(torch::Tensor src, int64_t start, int64_t k) {
 
 torch::Tensor fm_knn1(torch::Tensor x, torch::Tensor y, torch::Tensor cand) {
   TORCH_CHECK(x.is_cuda() && y.is_cuda() && cand.is_cuda(), "fm_knn1 expects CUDA tensors");
+  TORCH_CHECK(x.device() == y.device() && x.device() == cand.device(),
+              "fm_knn1: tensors on different devices");
+  TORCH_CHECK(x.dim() == 2 && y.dim() == 2 && cand.dim() == 2 && x.size(1) == y.size(1) &&
+              cand.size(0) == y.size(0), "fm_knn1: shape mismatch");
+  const c10::cuda::CUDAGuard guard(x.device());
   x = x.contiguous().to(torch::kFloat);
   y = y.contiguous().to(torch::kFloat);
   cand = cand.contiguous().to(torch::kLong);

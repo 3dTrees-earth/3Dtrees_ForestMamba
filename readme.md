@@ -354,7 +354,11 @@ the raw-point to voxel lookup and several post-processing steps
 - `FM_LEGACY=1` runs the original torch_cluster sampling and remapping instead.
 - `FM_VERIFY=1` also runs the replaced code on every window and prints
   `[fm-verify] {...}` with mismatch counts at the end of each tile (all should
-  be 0). Validation only: it is several times slower.
+  be 0; `remap_fallback_windows` counts windows where the fast lookup could
+  not prove its answer and the original ran). Validation only: it is several
+  times slower.
+- Windows whose voxels all vanish in the backbone are skipped; the log then says
+  `[forestmamba] skipped N window(s) ...`.
 - `python tests/test_exact_speedups.py` (inside the image) compares each new
   function with the 1.0.2 code.
 
